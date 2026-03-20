@@ -1,0 +1,632 @@
+{
+  "freelancers": [
+    {
+      "email": "marcelo.vita.marcomini@gmail.com",
+      "hasCnpj": false,
+      "phone": "+55 (11) 91008-3188",
+      "passwordHash": "",
+      "profile": {
+        "id": "34142763-847a-405b-a12a-198aaa8fbf02",
+        "slug": "marcelo-vita-site",
+        "name": "Marcelo Vita",
+        "profession": "Site",
+        "category": "Programação",
+        "summary": "Teste sobre desenvolviemnto",
+        "description": "Teste sobre desenvolviemntoTeste sobre desenvolviemntoTeste sobre desenvolviemnto",
+        "location": "Sp, Sp",
+        "experienceLevel": "Pleno",
+        "yearsExperience": 7,
+        "averagePrice": 950,
+        "skills": [
+          "Site",
+          "Programação",
+          "Atendimento direto"
+        ],
+        "portfolio": [
+          {
+            "title": "Portfólio principal",
+            "description": "Link informado pelo profissional no momento do cadastro.",
+            "url": "https://www.linkedin.com/"
+          }
+        ],
+        "avatarUrl": "https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=400&q=80",
+        "bannerUrl": "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1400&q=80",
+        "whatsapp": "5511910083188",
+        "verified": false,
+        "availability": "Perfil recém-publicado. Defina sua disponibilidade no painel.",
+        "memberSince": "2026-03-19T22:10:11.999Z"
+      },
+      "subscription": {
+        "tier": "normal",
+        "name": "Plano Freelancer Normal",
+        "priceMonthly": 5.49,
+        "status": "active",
+        "startedAt": "2026-03-19T22:10:11.999Z",
+        "endsAt": "2026-04-18T22:10:11.999Z"
+      },
+      "metrics": {
+        "profileViews": 0,
+        "contactClicks": 0,
+        "messagesReceived": 0
+      }
+    },
+    {
+      "email": "facofreela.oficial2026@gmail.com",
+      "hasCnpj": true,
+      "phone": "+55 (11) 91008-3188",
+      "passwordHash": "",
+      "profile": {
+        "id": "f45ddac4-b480-4f69-873d-e0a9cdd7c687",
+        "slug": "facofreela-teste-site",
+        "name": "FaçoFreela Teste",
+        "profession": "Site",
+        "category": "Programação",
+        "summary": "Teste sobre desenvolviemnto",
+        "description": "Teste sobre desenvolviemntoTeste sobre desenvolviemntoTeste sobre desenvolviemnto",
+        "location": "Sp, Sp",
+        "experienceLevel": "Pleno",
+        "yearsExperience": 7,
+        "averagePrice": 950,
+        "skills": [
+          "Site",
+          "Programação",
+          "Atendimento direto"
+        ],
+        "portfolio": [
+          {
+            "title": "Portfólio principal",
+            "description": "Link informado pelo profissional no momento do cadastro.",
+            "url": "https://www.linkedin.com/"
+          }
+        ],
+        "avatarUrl": "https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=400&q=80",
+        "bannerUrl": "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1400&q=80",
+        "whatsapp": "5511910083188",
+        "verified": false,
+        "availability": "Perfil recém-publicado. Defina sua disponibilidade no painel.",
+        "memberSince": "2026-03-19T17:10:23.097Z"
+      },
+      "subscription": {
+        "tier": "normal",
+        "name": "Plano Freelancer Normal",
+        "priceMonthly": 5.49,
+        "status": "active",
+        "startedAt": "2026-03-19T17:10:23.097Z",
+        "endsAt": "2026-04-18T17:10:23.097Z"
+      },
+      "metrics": {
+        "profileViews": 0,
+        "contactClicks": 0,
+        "messagesReceived": 0
+      }
+    },
+    {
+      "email": "aline@facofreela.com",
+      "hasCnpj": false,
+      "passwordHash": "97b482e68cdd51bab0de783de802ee28:7424b0a54d89b37e9645c8fdae62a01c829f2034d1711edce4e63da3732a0d61dc1c84cbefd7adc53e1faf47ea1c822bf273b153ce76c05808cb67c0fd0d3307",
+      "phone": "(11) 99999-1111",
+      "profile": {
+        "id": "freelancer-1",
+        "slug": "aline-rocha-ux-designer",
+        "name": "Aline Rocha",
+        "profession": "UX/UI Designer",
+        "category": "Design",
+        "summary": "Design de produtos digitais com foco em conversão, clareza e experiência do usuário.",
+        "description": "Ajudo startups e negócios digitais a transformar processos confusos em experiências intuitivas. Atuo com discovery, interface, design system e protótipos navegáveis para produtos web e mobile.",
+        "location": "São Paulo, SP",
+        "experienceLevel": "Sênior",
+        "yearsExperience": 8,
+        "averagePrice": 1800,
+        "skills": [
+          "Figma",
+          "Design System",
+          "UX Research",
+          "Prototipagem"
+        ],
+        "portfolio": [
+          {
+            "title": "Projeto em destaque",
+            "description": "Estudo de caso com foco em resultado mensurável e apresentação profissional.",
+            "url": "https://www.behance.net/"
+          },
+          {
+            "title": "Portfólio completo",
+            "description": "Coleção de trabalhos recentes com contexto, processo e resultados.",
+            "url": "https://www.behance.net/"
+          }
+        ],
+        "avatarUrl": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80",
+        "bannerUrl": "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1600&q=80",
+        "linkedinUrl": "https://www.linkedin.com/",
+        "websiteUrl": "https://dribbble.com/",
+        "whatsapp": "5511999991111",
+        "verified": true,
+        "availability": "Aceitando novos projetos para abril.",
+        "memberSince": "2024-04-18"
+      },
+      "subscription": {
+        "tier": "normal",
+        "name": "Plano Freelancer Normal",
+        "priceMonthly": 5.49,
+        "status": "active",
+        "startedAt": "2026-02-10",
+        "endsAt": "2026-03-10"
+      },
+      "metrics": {
+        "profileViews": 851,
+        "contactClicks": 120,
+        "messagesReceived": 19
+      }
+    },
+    {
+      "email": "bruno@facofreela.com",
+      "hasCnpj": true,
+      "passwordHash": "93519ccf8c77ed828daaae699f6063d3:4560d891a481ac964a390c88b44b76b1db8c00ac5d10e91d18850751325b65917390fc0656415c13064b0de31b9443723a9e28dc22c301bfa337461525354fdf",
+      "phone": "(21) 98888-2222",
+      "profile": {
+        "id": "freelancer-2",
+        "slug": "bruno-silva-desenvolvedor-full-stack",
+        "name": "Bruno Silva",
+        "profession": "Desenvolvedor Full Stack",
+        "category": "Programação",
+        "summary": "Construo aplicações web escaláveis com foco em performance, produto e deploy contínuo.",
+        "description": "Desenvolvedor com experiência em React, Node.js, APIs REST e arquitetura para produtos digitais. Trabalho em MVPs, painéis administrativos, integrações e manutenção evolutiva.",
+        "location": "Rio de Janeiro, RJ",
+        "experienceLevel": "Sênior",
+        "yearsExperience": 10,
+        "averagePrice": 2400,
+        "skills": [
+          "React",
+          "TypeScript",
+          "Node.js",
+          "PostgreSQL"
+        ],
+        "portfolio": [
+          {
+            "title": "Projeto em destaque",
+            "description": "Estudo de caso com foco em resultado mensurável e apresentação profissional.",
+            "url": "https://github.com/"
+          },
+          {
+            "title": "Portfólio completo",
+            "description": "Coleção de trabalhos recentes com contexto, processo e resultados.",
+            "url": "https://github.com/"
+          }
+        ],
+        "avatarUrl": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80",
+        "bannerUrl": "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1600&q=80",
+        "linkedinUrl": "https://www.linkedin.com/",
+        "websiteUrl": "https://github.com/",
+        "whatsapp": "5521988882222",
+        "verified": true,
+        "availability": "Disponível para squads de produto e entregas sob escopo fechado.",
+        "memberSince": "2023-11-02"
+      },
+      "subscription": {
+        "tier": "booster",
+        "name": "Plano Freelancer Booster",
+        "priceMonthly": 5.99,
+        "status": "active",
+        "startedAt": "2026-02-26",
+        "endsAt": "2026-03-26"
+      },
+      "metrics": {
+        "profileViews": 1248,
+        "contactClicks": 204,
+        "messagesReceived": 29
+      }
+    },
+    {
+      "email": "camila@facofreela.com",
+      "hasCnpj": true,
+      "passwordHash": "ed42c0c48b9266a94427dce9f60cb7d0:cf62a0f8a19546c7ebe08a6ae0befb7ccf3cc13ab623cfd1153b8eaa88d8f9b81abab232afe8ede741dbc0ecccd5b9fa75e65f3191400536945a618b726ee67d",
+      "phone": "(31) 97777-3333",
+      "profile": {
+        "id": "freelancer-3",
+        "slug": "camila-souza-estrategista-de-marketing",
+        "name": "Camila Souza",
+        "profession": "Estrategista de Marketing Digital",
+        "category": "Marketing Digital",
+        "summary": "Planejamento, mídia e funil de aquisição para negócios que precisam crescer com previsibilidade.",
+        "description": "Atuo com diagnóstico de aquisição, campanhas de performance, estruturação de CRM e copy para landing pages. Meu foco é transformar tráfego em receita com clareza de métricas.",
+        "location": "Belo Horizonte, MG",
+        "experienceLevel": "Pleno",
+        "yearsExperience": 6,
+        "averagePrice": 1500,
+        "skills": [
+          "Meta Ads",
+          "Google Ads",
+          "CRM",
+          "Copywriting"
+        ],
+        "portfolio": [
+          {
+            "title": "Projeto em destaque",
+            "description": "Estudo de caso com foco em resultado mensurável e apresentação profissional.",
+            "url": "https://www.notion.so/"
+          },
+          {
+            "title": "Portfólio completo",
+            "description": "Coleção de trabalhos recentes com contexto, processo e resultados.",
+            "url": "https://www.notion.so/"
+          }
+        ],
+        "avatarUrl": "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=400&q=80",
+        "bannerUrl": "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1600&q=80",
+        "linkedinUrl": "https://www.linkedin.com/",
+        "websiteUrl": "https://www.notion.so/",
+        "whatsapp": "5531977773333",
+        "verified": true,
+        "availability": "Atendo lançamentos, e-commerce e negócios locais.",
+        "memberSince": "2025-01-14"
+      },
+      "subscription": {
+        "tier": "normal",
+        "name": "Plano Freelancer Normal",
+        "priceMonthly": 5.49,
+        "status": "active",
+        "startedAt": "2026-02-15",
+        "endsAt": "2026-03-15"
+      },
+      "metrics": {
+        "profileViews": 692,
+        "contactClicks": 86,
+        "messagesReceived": 13
+      }
+    },
+    {
+      "email": "diego@facofreela.com",
+      "hasCnpj": false,
+      "passwordHash": "81bd0ec4a2339e1eba5d302574624e2c:090a2b729429574126a4edf65712fecbd1ac96575ed009aa31c28fa767088ef38b13a956cfaf81e42942b790649887353eef7990cffae9bebc40aebd84c3ba5f",
+      "phone": "(81) 96666-4444",
+      "profile": {
+        "id": "freelancer-4",
+        "slug": "diego-alves-editor-de-video",
+        "name": "Diego Alves",
+        "profession": "Editor de Vídeo",
+        "category": "Edição de Vídeo",
+        "summary": "Edição comercial para lançamentos, social media e vídeos institucionais com ritmo e clareza.",
+        "description": "Produzo vídeos orientados a resultado, com cortes estratégicos, motion leve e adaptação para múltiplos formatos. Trabalho com creators, infoprodutos e marcas em expansão.",
+        "location": "Recife, PE",
+        "experienceLevel": "Pleno",
+        "yearsExperience": 5,
+        "averagePrice": 1200,
+        "skills": [
+          "Premiere",
+          "After Effects",
+          "CapCut",
+          "Storytelling"
+        ],
+        "portfolio": [
+          {
+            "title": "Projeto em destaque",
+            "description": "Estudo de caso com foco em resultado mensurável e apresentação profissional.",
+            "url": "https://vimeo.com/"
+          },
+          {
+            "title": "Portfólio completo",
+            "description": "Coleção de trabalhos recentes com contexto, processo e resultados.",
+            "url": "https://vimeo.com/"
+          }
+        ],
+        "avatarUrl": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=400&q=80",
+        "bannerUrl": "https://images.unsplash.com/photo-1478720568477-152d9b164e26?auto=format&fit=crop&w=1600&q=80",
+        "linkedinUrl": "https://www.linkedin.com/",
+        "websiteUrl": "https://vimeo.com/",
+        "whatsapp": "5581966664444",
+        "verified": false,
+        "availability": "Agenda com encaixe para pacotes recorrentes.",
+        "memberSince": "2025-06-08"
+      },
+      "subscription": {
+        "tier": "normal",
+        "name": "Plano Freelancer Normal",
+        "priceMonthly": 5.49,
+        "status": "active",
+        "startedAt": "2026-02-28",
+        "endsAt": "2026-03-28"
+      },
+      "metrics": {
+        "profileViews": 514,
+        "contactClicks": 55,
+        "messagesReceived": 9
+      }
+    },
+    {
+      "email": "elis@facofreela.com",
+      "hasCnpj": true,
+      "passwordHash": "077acf02c941e95d06f98a53f6e84430:f0f581f98b2d7b5c5aac6cc4688e13e2ac9f67d5c8c0838f199dc86c598c3a1cec8110b6344c5a1a73df4d4198bb1405f429f509789f0927d7ae89f05eebafa9",
+      "phone": "(41) 95555-5555",
+      "profile": {
+        "id": "freelancer-5",
+        "slug": "elis-pereira-redatora-seo",
+        "name": "Elis Pereira",
+        "profession": "Redatora SEO",
+        "category": "Redação",
+        "summary": "Conteúdo que posiciona no Google e melhora a conversão da jornada comercial.",
+        "description": "Crio artigos, páginas estratégicas e materiais ricos com pesquisa de intenção de busca, arquitetura de conteúdo e linguagem adaptada ao público. Também reviso textos de vendas.",
+        "location": "Curitiba, PR",
+        "experienceLevel": "Pleno",
+        "yearsExperience": 7,
+        "averagePrice": 950,
+        "skills": [
+          "SEO",
+          "Conteúdo",
+          "Pesquisa de Palavra-chave",
+          "Ghostwriting"
+        ],
+        "portfolio": [
+          {
+            "title": "Projeto em destaque",
+            "description": "Estudo de caso com foco em resultado mensurável e apresentação profissional.",
+            "url": "https://medium.com/"
+          },
+          {
+            "title": "Portfólio completo",
+            "description": "Coleção de trabalhos recentes com contexto, processo e resultados.",
+            "url": "https://medium.com/"
+          }
+        ],
+        "avatarUrl": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80",
+        "bannerUrl": "https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=1600&q=80",
+        "linkedinUrl": "https://www.linkedin.com/",
+        "websiteUrl": "https://medium.com/",
+        "whatsapp": "5541955555555",
+        "verified": true,
+        "availability": "Recebo demandas avulsas e calendários mensais.",
+        "memberSince": "2024-09-03"
+      },
+      "subscription": {
+        "tier": "booster",
+        "name": "Plano Freelancer Booster",
+        "priceMonthly": 5.99,
+        "status": "active",
+        "startedAt": "2026-02-18",
+        "endsAt": "2026-03-18"
+      },
+      "metrics": {
+        "profileViews": 478,
+        "contactClicks": 61,
+        "messagesReceived": 11
+      }
+    },
+    {
+      "email": "fabio@facofreela.com",
+      "hasCnpj": true,
+      "passwordHash": "793e3de3cbed5693e46b2746951f451e:6a3b9af24d862231cee64d9303d768994044c2792c11885b7244b387187e24300c6f761b8a7f577a8716ab15ad7677e9605c2c26026afc78ec2b8fa150b476b3",
+      "phone": "(51) 94444-6666",
+      "profile": {
+        "id": "freelancer-6",
+        "slug": "fabio-lima-consultor-de-operacoes",
+        "name": "Fábio Lima",
+        "profession": "Consultor de Operações",
+        "category": "Consultoria",
+        "summary": "Organização de processos, indicadores e operação para empresas em fase de crescimento.",
+        "description": "Atuo com diagnóstico de gargalos, padronização operacional, construção de rituais de gestão e acompanhamento de indicadores para pequenos e médios negócios.",
+        "location": "Porto Alegre, RS",
+        "experienceLevel": "Sênior",
+        "yearsExperience": 12,
+        "averagePrice": 2800,
+        "skills": [
+          "Processos",
+          "KPIs",
+          "Gestão",
+          "Planejamento"
+        ],
+        "portfolio": [
+          {
+            "title": "Projeto em destaque",
+            "description": "Estudo de caso com foco em resultado mensurável e apresentação profissional.",
+            "url": "https://www.notion.so/"
+          },
+          {
+            "title": "Portfólio completo",
+            "description": "Coleção de trabalhos recentes com contexto, processo e resultados.",
+            "url": "https://www.notion.so/"
+          }
+        ],
+        "avatarUrl": "https://images.unsplash.com/photo-1504593811423-6dd665756598?auto=format&fit=crop&w=400&q=80",
+        "bannerUrl": "https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=1600&q=80",
+        "linkedinUrl": "https://www.linkedin.com/",
+        "websiteUrl": "https://www.notion.so/",
+        "whatsapp": "5551944446666",
+        "verified": true,
+        "availability": "Atendimento por diagnóstico e implantação.",
+        "memberSince": "2023-06-21"
+      },
+      "subscription": {
+        "tier": "normal",
+        "name": "Plano Freelancer Normal",
+        "priceMonthly": 5.49,
+        "status": "expired",
+        "startedAt": "2026-01-01",
+        "endsAt": "2026-02-01"
+      },
+      "metrics": {
+        "profileViews": 301,
+        "contactClicks": 22,
+        "messagesReceived": 5
+      }
+    }
+  ],
+  "clients": [
+    {
+      "profile": {
+        "id": "0d3931dd-1317-4069-a010-4650c91383b8",
+        "name": "Teste Cliente",
+        "email": "marcelinhovita1000@gmail.com",
+        "phone": "+55 (11) 91008-3188",
+        "location": "Sp, Sp",
+        "createdAt": "2026-03-19T04:10:24.586Z"
+      },
+      "passwordHash": ""
+    },
+    {
+      "profile": {
+        "id": "client-1",
+        "name": "Marina Costa",
+        "email": "marina@cliente.com",
+        "phone": "(11) 97777-0000",
+        "location": "Campinas, SP",
+        "createdAt": "2026-02-14"
+      },
+      "passwordHash": "61becaba91d248678a1ac8c059888c6c:981df4c7a128f77b04be55f672cd489373cc9fab655890fe89518dbc163023dcb8eadd571d1c06d47a47df89a0f13e718086d118446e4c323348518ee55229b6"
+    }
+  ],
+  "contacts": [
+    {
+      "id": "contact-1773770156355",
+      "freelancerId": "freelancer-1",
+      "freelancerName": "Aline Rocha",
+      "freelancerEmail": "aline@facofreela.com",
+      "clientId": "client-1",
+      "clientName": "Marina Costa",
+      "clientLocation": "Campinas, SP",
+      "clientEmail": "marina@cliente.com",
+      "clientPhone": "(11) 97777-0000",
+      "subject": "ladning page",
+      "message": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "channel": "E-mail",
+      "createdAt": "2026-03-17T17:55:56.355Z",
+      "status": "Novo",
+      "messages": [
+        {
+          "id": "contact-1773770156355-message-1",
+          "senderRole": "client",
+          "senderName": "Marina Costa",
+          "body": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          "createdAt": "2026-03-17T17:55:56.355Z"
+        }
+      ]
+    },
+    {
+      "id": "contact-1773766075077",
+      "freelancerId": "freelancer-1",
+      "freelancerName": "Aline Rocha",
+      "clientName": "Marina Costa",
+      "clientLocation": "Campinas, SP",
+      "subject": "ladning page",
+      "message": "aaaaaaaaaaaaaaaaaaaaa",
+      "channel": "Plataforma",
+      "createdAt": "2026-03-17T16:47:55.077Z",
+      "status": "Novo",
+      "freelancerEmail": "aline@facofreela.com",
+      "clientId": "client-1",
+      "clientEmail": "marina@cliente.com",
+      "clientPhone": "(11) 97777-0000",
+      "messages": [
+        {
+          "id": "contact-1773766075077-message-1",
+          "senderRole": "client",
+          "senderName": "Marina Costa",
+          "body": "aaaaaaaaaaaaaaaaaaaaa",
+          "createdAt": "2026-03-17T16:47:55.077Z"
+        }
+      ]
+    },
+    {
+      "id": "contact-1",
+      "freelancerId": "freelancer-1",
+      "freelancerName": "Aline Rocha",
+      "clientName": "Marina Costa",
+      "clientLocation": "Campinas, SP",
+      "subject": "Landing page para SaaS B2B",
+      "message": "Gostaria de entender como você estrutura um redesign com foco em conversão.",
+      "channel": "Plataforma",
+      "createdAt": "2026-03-07T14:15:00.000Z",
+      "status": "Novo",
+      "freelancerEmail": "aline@facofreela.com",
+      "clientId": "client-1",
+      "clientEmail": "marina@cliente.com",
+      "clientPhone": "(11) 97777-0000",
+      "messages": [
+        {
+          "id": "contact-1-message-1",
+          "senderRole": "client",
+          "senderName": "Marina Costa",
+          "body": "Gostaria de entender como você estrutura um redesign com foco em conversão.",
+          "createdAt": "2026-03-07T14:15:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "contact-2",
+      "freelancerId": "freelancer-1",
+      "freelancerName": "Aline Rocha",
+      "clientName": "Henrique Vidal",
+      "clientLocation": "São Paulo, SP",
+      "subject": "Sistema interno para operação",
+      "message": "Preciso desenhar uma experiência mais simples para o painel da equipe comercial.",
+      "channel": "E-mail",
+      "createdAt": "2026-03-05T11:20:00.000Z",
+      "status": "Respondido",
+      "freelancerEmail": "aline@facofreela.com",
+      "messages": [
+        {
+          "id": "contact-2-message-1",
+          "senderRole": "client",
+          "senderName": "Henrique Vidal",
+          "body": "Preciso desenhar uma experiência mais simples para o painel da equipe comercial.",
+          "createdAt": "2026-03-05T11:20:00.000Z"
+        }
+      ]
+    },
+    {
+      "id": "contact-3",
+      "freelancerId": "freelancer-2",
+      "freelancerName": "Bruno Silva",
+      "clientName": "Marina Costa",
+      "clientLocation": "Campinas, SP",
+      "subject": "MVP em React e API",
+      "message": "Procuro alguém para estruturar a primeira versão da nossa plataforma web.",
+      "channel": "Plataforma",
+      "createdAt": "2026-03-02T09:00:00.000Z",
+      "status": "Novo",
+      "freelancerEmail": "bruno@facofreela.com",
+      "clientId": "client-1",
+      "clientEmail": "marina@cliente.com",
+      "clientPhone": "(11) 97777-0000",
+      "messages": [
+        {
+          "id": "contact-3-message-1",
+          "senderRole": "client",
+          "senderName": "Marina Costa",
+          "body": "Procuro alguém para estruturar a primeira versão da nossa plataforma web.",
+          "createdAt": "2026-03-02T09:00:00.000Z"
+        }
+      ]
+    }
+  ],
+  "sessions": [
+    {
+      "token": "6067f507005255785183d329104f0dbf01e1a9debf6e2f4b1ab2ff9dbd5808b3",
+      "userId": "34142763-847a-405b-a12a-198aaa8fbf02",
+      "role": "freelancer",
+      "expiresAt": "2026-03-26T22:11:23.577Z"
+    },
+    {
+      "token": "ff396b473c31d6fef9d70ef01b4adbdf46e08f596aeff67cf8b508a2c7316f46",
+      "userId": "f45ddac4-b480-4f69-873d-e0a9cdd7c687",
+      "role": "freelancer",
+      "expiresAt": "2026-03-26T17:11:35.464Z"
+    },
+    {
+      "token": "825a847cac43322c8b58d18b61f90d71097741aae2f03040647b0192ae53634e",
+      "userId": "client-1",
+      "role": "client",
+      "expiresAt": "2026-03-24T16:10:16.981Z"
+    },
+    {
+      "token": "f6d0d3680bec530365e0dc70e69df6ac4f8d4735e5ba73be1fae68d52f6870d3",
+      "userId": "freelancer-1",
+      "role": "freelancer",
+      "expiresAt": "2026-03-24T16:10:16.728Z"
+    },
+    {
+      "token": "1fd1ed547e8a47d7810d760f4b42a42a61fedf35560ca2fa474a8343fd17c054",
+      "userId": "client-1",
+      "role": "client",
+      "expiresAt": "2026-03-24T15:49:05.641Z"
+    }
+  ]
+}

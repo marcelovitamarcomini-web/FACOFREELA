@@ -1,0 +1,80 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+:root {
+  color-scheme: light;
+  --bg: #eef4ff;
+  --surface: rgba(255, 255, 255, 0.8);
+  --surface-strong: rgba(255, 255, 255, 0.92);
+  --border: rgba(148, 163, 184, 0.22);
+  --text: #0f172a;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  position: relative;
+  margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(circle at top left, rgba(34, 211, 238, 0.18), transparent 22%),
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.16), transparent 24%),
+    radial-gradient(circle at 20% 80%, rgba(14, 165, 233, 0.1), transparent 28%),
+    linear-gradient(180deg, #f3f8ff 0%, #eef4ff 38%, #f8fbff 100%);
+  color: var(--text);
+  font-family: 'Space Grotesk', 'Trebuchet MS', 'Segoe UI', sans-serif;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to right, rgba(15, 23, 42, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(circle at center, black 35%, transparent 100%);
+}
+
+a {
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.glass-panel {
+  background: var(--surface);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--border);
+  box-shadow: 0 22px 70px rgba(15, 23, 42, 0.1);
+}
+
+.tech-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.tech-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.12), transparent 28%, transparent 72%, rgba(59, 130, 246, 0.08));
+  opacity: 0.9;
+}
+
+.hero-grid {
+  background-size: 36px 36px;
+}
