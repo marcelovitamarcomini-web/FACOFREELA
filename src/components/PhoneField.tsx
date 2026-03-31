@@ -1,4 +1,4 @@
-import { BRAZIL_COUNTRY_CODE, BRAZIL_DDDS, formatBrazilPhoneLocal } from '../lib/phone';
+import { BRAZIL_DDDS, formatBrazilPhoneLocal } from '../lib/phone';
 
 interface PhoneFieldProps {
   error?: string;
@@ -10,9 +10,6 @@ interface PhoneFieldProps {
   hint?: string;
 }
 
-const fieldClassName =
-  'w-full rounded-2xl border border-slate-200/90 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition duration-200 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-400/10';
-
 export function PhoneField({
   dddValue,
   error,
@@ -23,44 +20,56 @@ export function PhoneField({
   onNumberChange,
 }: PhoneFieldProps) {
   const hasError = Boolean(error);
-  const inputClassName = hasError
-    ? `${fieldClassName} border-rose-300 focus:border-rose-400 focus:ring-rose-400/10`
-    : fieldClassName;
 
   return (
-    <label className="block space-y-2">
+    <label className="block space-y-2.5">
       <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">{label}</span>
 
-      <div className="grid gap-3 sm:grid-cols-[88px_92px_minmax(0,1fr)]">
-        <div className="flex items-center justify-center rounded-2xl border border-slate-200/90 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700">
-          {BRAZIL_COUNTRY_CODE}
+      <div
+        className={`rounded-[28px] border p-2 transition ${
+          hasError
+            ? 'border-rose-300 bg-rose-50/30'
+            : 'border-slate-200/80 bg-white/92 shadow-[0_10px_24px_rgba(15,23,42,0.04)]'
+        }`}
+      >
+        <div className="grid gap-2 sm:grid-cols-[124px_minmax(0,1fr)]">
+          <div className="flex min-h-[74px] flex-col justify-center rounded-[22px] border border-slate-200/80 bg-white px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              DDD
+            </p>
+            <select
+              className="mt-1 w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none"
+              onChange={(event) => onDddChange(event.target.value)}
+              value={dddValue}
+            >
+              <option value="">Selecione</option>
+              {BRAZIL_DDDS.map((ddd) => (
+                <option key={ddd} value={ddd}>
+                  {ddd}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex min-h-[74px] flex-col justify-center rounded-[22px] border border-slate-200/80 bg-white px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Celular ou WhatsApp
+            </p>
+            <input
+              className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+              inputMode="numeric"
+              maxLength={10}
+              onChange={(event) => onNumberChange(formatBrazilPhoneLocal(event.target.value))}
+              placeholder="99999-9999"
+              type="text"
+              value={numberValue}
+            />
+          </div>
         </div>
 
-        <select
-          className={inputClassName}
-          onChange={(event) => onDddChange(event.target.value)}
-          value={dddValue}
-        >
-          <option value="">DDD</option>
-          {BRAZIL_DDDS.map((ddd) => (
-            <option key={ddd} value={ddd}>
-              {ddd}
-            </option>
-          ))}
-        </select>
-
-        <input
-          className={inputClassName}
-          inputMode="numeric"
-          maxLength={10}
-          onChange={(event) => onNumberChange(formatBrazilPhoneLocal(event.target.value))}
-          placeholder="99999-9999"
-          type="text"
-          value={numberValue}
-        />
+        {hint ? <p className="px-2 pt-3 text-xs leading-5 text-slate-500">{hint}</p> : null}
       </div>
 
-      {hint ? <p className="text-xs leading-5 text-slate-500">{hint}</p> : null}
       {error ? <p className="text-sm text-rose-600">{error}</p> : null}
     </label>
   );

@@ -6,10 +6,12 @@ import { Hono } from 'hono';
 import {
   categories,
   type ApiEnvelope,
-  type ContactMessage,
+  type AuthSessionPayload,
   type Freelancer,
+  type ProfileAssetUploadResponse,
   freelancerPlanCatalog,
-  getFreelancerPlanPrice,
+  platformContactChannel,
+  type RegistrationResponse,
   type SessionUser,
 } from '../../shared/contracts.js';
 import {
@@ -20,39 +22,38 @@ import {
   loginSchema,
   searchSchema,
 } from '../../shared/schemas.js';
-import { createPasswordHash, SESSION_MAX_AGE_SECONDS, verifyPassword } from './auth.js';
+import { SESSION_MAX_AGE_SECONDS } from './auth.js';
 import {
-  addContact,
   appendContactMessage,
+  createOrContinueContact,
   createSession,
   deleteSession,
   findContactById,
   findSession,
+  updateSessionAuthState,
+  type StoredSession,
 } from './data.js';
 import {
   authenticateWithSupabase,
   isSupabaseAuthEnabled,
   registerSupabaseUser,
+  refreshSupabaseUserSession,
+  uploadSupabaseProfileAsset,
 } from './supabase.js';
 import {
-  createLegacyClientShadow,
-  createLegacyFreelancerShadow,
-  createPublicSlug,
   createSupabaseUserProfiles,
   ensureSupabaseUserSubtypeMaterialized,
-  ensureUniqueFreelancerSlug,
   findClientRecordById,
   findFreelancerRecordById,
   findSessionUserByEmail,
   findSessionUserById,
   getClientDashboard,
+  getConversationInbox,
   getFreelancerDashboard,
-  getNextClientId,
-  getNextFreelancerId,
-  isSupabaseManagedUserId,
   listPublicFreelancers,
-  purgeLegacyUserShadow,
   recordFreelancerProfileView,
+  updateSupabaseProfileAvatarUrl,
+  updateSupabaseFreelancerBannerUrl,
 } from './user-store.js';
 
 const app = new Hono();
@@ -67,15 +68,6 @@ app.use(
   }),
 );
 
-function slugify(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
-}
-
 function envelope<T>(data: T, message?: string): ApiEnvelope<T> {
   return { data, message };
 }
@@ -87,17 +79,30 @@ function splitLocation(location: string) {
   };
 }
 
-async function canViewFreelancerPrices(c: Parameters<typeof getCookie>[0]): Promise<boolean> {
-  const auth = await getAuthenticatedUser(c);
+function parseFreelancerExperienceLevel(value?: string | null): Freelancer['experienceLevel'] | undefined {
+  const normalized = value
+    ?.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
 
-  return auth?.user.role === 'client';
+  if (normalized === 'junior') {
+    return 'J\u00fanior';
+  }
+
+  if (normalized === 'pleno') {
+    return 'Pleno';
+  }
+
+  if (normalized === 'senior') {
+    return 'S\u00eanior';
+  }
+
+  return undefined;
 }
 
-function serializeFreelancer(freelancer: Freelancer, showPrice: boolean): Freelancer {
-  return {
-    ...freelancer,
-    averagePrice: showPrice ? freelancer.averagePrice : null,
-  };
+function serializeFreelancer(freelancer: Freelancer): Freelancer {
+  return freelancer;
 }
 
 function setSessionCookie(token: string, c: Parameters<typeof setCookie>[0]) {
@@ -129,12 +134,78 @@ function clearSessionCookie(c: Parameters<typeof deleteCookie>[0]) {
   });
 }
 
+function isSupabaseAccessTokenExpired(expiresAt?: string | null): boolean {
+  if (!expiresAt) {
+    return true;
+  }
+
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs)) {
+    return true;
+  }
+
+  return expiresAtMs - Date.now() <= 60_000;
+}
+
+async function ensureSessionSupabaseAuth(session: StoredSession) {
+  if (!isSupabaseAuthEnabled()) {
+    return {
+      accessToken: session.supabaseAccessToken ?? null,
+      refreshToken: session.supabaseRefreshToken ?? null,
+      accessTokenExpiresAt: session.supabaseAccessTokenExpiresAt ?? null,
+    };
+  }
+
+  if (
+    session.supabaseAccessToken &&
+    !isSupabaseAccessTokenExpired(session.supabaseAccessTokenExpiresAt)
+  ) {
+    return {
+      accessToken: session.supabaseAccessToken,
+      refreshToken: session.supabaseRefreshToken ?? null,
+      accessTokenExpiresAt: session.supabaseAccessTokenExpiresAt ?? null,
+    };
+  }
+
+  if (!session.supabaseRefreshToken) {
+    return {
+      accessToken: session.supabaseAccessToken ?? null,
+      refreshToken: null,
+      accessTokenExpiresAt: session.supabaseAccessTokenExpiresAt ?? null,
+    };
+  }
+
+  const refreshResult = await refreshSupabaseUserSession({
+    refreshToken: session.supabaseRefreshToken,
+  });
+  if (!refreshResult.ok) {
+    return {
+      accessToken: session.supabaseAccessToken ?? null,
+      refreshToken: session.supabaseRefreshToken ?? null,
+      accessTokenExpiresAt: session.supabaseAccessTokenExpiresAt ?? null,
+    };
+  }
+
+  updateSessionAuthState(session.token, {
+    supabaseAccessToken: refreshResult.accessToken,
+    supabaseRefreshToken: refreshResult.refreshToken,
+    supabaseAccessTokenExpiresAt: refreshResult.accessTokenExpiresAt,
+  });
+
+  return {
+    accessToken: refreshResult.accessToken,
+    refreshToken: refreshResult.refreshToken,
+    accessTokenExpiresAt: refreshResult.accessTokenExpiresAt,
+  };
+}
+
 async function getAuthenticatedUser(
   c: Parameters<typeof getCookie>[0],
 ): Promise<
   | {
       token: string;
       user: SessionUser;
+      supabaseAccessToken: string | null;
     }
   | null
 > {
@@ -149,14 +220,23 @@ async function getAuthenticatedUser(
     return null;
   }
 
-  const user = await findSessionUserById(session.userId, session.role);
+  const sessionAuth = await ensureSessionSupabaseAuth(session);
+  const user = await findSessionUserById(
+    session.userId,
+    session.role,
+    sessionAuth.accessToken ?? undefined,
+  );
   if (!user) {
     deleteSession(token);
     clearSessionCookie(c);
     return null;
   }
 
-  return { token, user };
+  return {
+    token,
+    user,
+    supabaseAccessToken: sessionAuth.accessToken ?? null,
+  };
 }
 
 function unauthorized(c: Parameters<typeof getCookie>[0], message = 'Faça login para continuar.') {
@@ -166,67 +246,6 @@ function unauthorized(c: Parameters<typeof getCookie>[0], message = 'Faça login
 
 function forbidden(c: Parameters<typeof getCookie>[0], message: string) {
   return c.json({ message }, 403);
-}
-
-async function syncLegacyUserProfileToSupabase(input: {
-  accessToken: string;
-  userId: string;
-  email: string;
-  role: SessionUser['role'];
-  fallbackName: string;
-}) {
-  // Compatibility sync for accounts that still have a local user shadow.
-  // It runs only after we finally obtain an authenticated Supabase access token.
-  // Remove this once local user shadows are retired at the end of Block 1.
-  if (input.role === 'client') {
-    const legacyClient = await findClientRecordById(input.userId);
-    if (!legacyClient) {
-      return;
-    }
-
-    const location = splitLocation(legacyClient.profile.location);
-    await createSupabaseUserProfiles({
-      id: input.userId,
-      email: input.email,
-      role: 'client',
-      fullName: legacyClient.profile.name,
-      accessToken: input.accessToken,
-      phone: legacyClient.profile.phone,
-      city: location.city,
-      state: location.state,
-    });
-    return;
-  }
-
-  const legacyFreelancer = await findFreelancerRecordById(input.userId);
-  if (!legacyFreelancer) {
-    return;
-  }
-
-  const location = splitLocation(legacyFreelancer.profile.location);
-  await createSupabaseUserProfiles({
-    id: input.userId,
-    email: input.email,
-    role: 'freelancer',
-    fullName: legacyFreelancer.profile.name || input.fallbackName,
-    accessToken: input.accessToken,
-    avatarUrl: legacyFreelancer.profile.avatarUrl,
-    phone: legacyFreelancer.phone,
-    city: location.city,
-    state: location.state,
-    bio: legacyFreelancer.profile.summary,
-    freelancer: {
-      professionalTitle: legacyFreelancer.profile.profession,
-      experienceLevel: legacyFreelancer.profile.experienceLevel,
-      skills: legacyFreelancer.profile.skills,
-      hourlyRate: legacyFreelancer.profile.averagePrice,
-      portfolioUrl:
-        legacyFreelancer.profile.portfolio[0]?.url ??
-        legacyFreelancer.profile.websiteUrl ??
-        'https://www.linkedin.com/',
-      availabilityStatus: legacyFreelancer.profile.availability,
-    },
-  });
 }
 
 type SuccessfulSupabaseAuth = Extract<
@@ -255,7 +274,46 @@ async function ensureSupabaseSessionUserAfterAuth(input: {
         })
       : fallbackRole;
   const resolvedRole = materializedRole ?? fallbackRole;
-  let sessionUser = await findSessionUserById(input.authResult.userId, resolvedRole);
+
+  if (input.authResult.accessToken && resolvedRole) {
+    await createSupabaseUserProfiles({
+      id: input.authResult.userId,
+      email: input.authResult.email ?? input.email,
+      role: resolvedRole,
+      fullName: input.lookup?.user.name ?? input.authResult.fullName ?? input.email,
+      accessToken: input.authResult.accessToken,
+      phone: input.authResult.profileSeed.phone ?? undefined,
+      city: input.authResult.profileSeed.city ?? undefined,
+      state: input.authResult.profileSeed.state ?? undefined,
+      avatarUrl: input.authResult.profileSeed.avatarUrl ?? undefined,
+      bio: input.authResult.profileSeed.bio ?? undefined,
+      freelancer:
+        resolvedRole === 'freelancer'
+          ? {
+              professionalTitle: input.authResult.profileSeed.professionalTitle ?? undefined,
+              experienceLevel: parseFreelancerExperienceLevel(
+                input.authResult.profileSeed.experienceLevel,
+              ),
+              skills: input.authResult.profileSeed.professionalTitle
+                ? [
+                    input.authResult.profileSeed.professionalTitle,
+                    input.authResult.profileSeed.category ?? 'Atendimento direto',
+                    'Atendimento direto',
+                  ]
+                : undefined,
+              portfolioUrl: input.authResult.profileSeed.portfolioUrl ?? undefined,
+              bannerUrl: input.authResult.profileSeed.bannerUrl ?? undefined,
+              availabilityStatus: 'available',
+            }
+          : undefined,
+    });
+  }
+
+  let sessionUser = await findSessionUserById(
+    input.authResult.userId,
+    resolvedRole,
+    input.authResult.accessToken ?? undefined,
+  );
   if (sessionUser) {
     return sessionUser;
   }
@@ -264,27 +322,21 @@ async function ensureSupabaseSessionUserAfterAuth(input: {
     return undefined;
   }
 
-  if (input.lookup?.source === 'legacy') {
-    await syncLegacyUserProfileToSupabase({
-      accessToken: input.authResult.accessToken,
-      userId: input.authResult.userId,
-      email: input.authResult.email ?? input.email,
-      role: resolvedRole,
-      fallbackName: input.lookup.user.name,
-    });
-  } else {
-    // This repairs accounts that authenticated in Supabase Auth but still
-    // do not have a usable application profile/subprofile row.
-    await createSupabaseUserProfiles({
-      id: input.authResult.userId,
-      email: input.authResult.email ?? input.email,
-      role: resolvedRole,
-      fullName: input.authResult.fullName ?? input.email,
-      accessToken: input.authResult.accessToken,
-    });
-  }
+  // This repairs accounts that authenticated in Supabase Auth but still
+  // do not have a usable application profile/subprofile row.
+  await createSupabaseUserProfiles({
+    id: input.authResult.userId,
+    email: input.authResult.email ?? input.email,
+    role: resolvedRole,
+    fullName: input.lookup?.user.name ?? input.authResult.fullName ?? input.email,
+    accessToken: input.authResult.accessToken,
+  });
 
-  sessionUser = await findSessionUserById(input.authResult.userId, resolvedRole);
+  sessionUser = await findSessionUserById(
+    input.authResult.userId,
+    resolvedRole,
+    input.authResult.accessToken,
+  );
   return sessionUser;
 }
 
@@ -307,7 +359,6 @@ app.get('/api/freelancers', async (c) => {
     category: c.req.query('category'),
     location: c.req.query('location'),
     experience: c.req.query('experience'),
-    maxPrice: c.req.query('maxPrice'),
   });
 
   if (!parsed.success) {
@@ -320,9 +371,8 @@ app.get('/api/freelancers', async (c) => {
     );
   }
 
-  const { category, experience, location, maxPrice, search } = parsed.data;
+  const { category, experience, location, search } = parsed.data;
   const normalizedSearch = search.toLowerCase();
-  const showPrices = await canViewFreelancerPrices(c);
 
   const results = (await listPublicFreelancers()).filter((freelancer) => {
     const matchesSearch =
@@ -336,19 +386,16 @@ app.get('/api/freelancers', async (c) => {
       !location || freelancer.location.toLowerCase().includes(location.toLowerCase());
     const matchesExperience =
       experience === 'Todos' || freelancer.experienceLevel === experience;
-    const matchesPrice =
-      !showPrices || !maxPrice || freelancer.averagePrice === null || freelancer.averagePrice <= maxPrice;
 
     return (
       matchesSearch &&
       matchesCategory &&
       matchesLocation &&
-      matchesExperience &&
-      matchesPrice
+      matchesExperience
     );
   });
 
-  return c.json(envelope(results.map((freelancer) => serializeFreelancer(freelancer, showPrices))));
+  return c.json(envelope(results.map((freelancer) => serializeFreelancer(freelancer))));
 });
 
 app.get('/api/freelancers/:slug', async (c) => {
@@ -358,7 +405,7 @@ app.get('/api/freelancers/:slug', async (c) => {
     return c.json({ message: 'Freelancer não encontrado.' }, 404);
   }
 
-  return c.json(envelope(serializeFreelancer(freelancer, await canViewFreelancerPrices(c))));
+  return c.json(envelope(serializeFreelancer(freelancer)));
 });
 
 app.get('/api/auth/session', async (c) => {
@@ -368,6 +415,93 @@ app.get('/api/auth/session', async (c) => {
   }
 
   return c.json(envelope({ user: auth.user }));
+});
+
+app.post('/api/profile/assets/:kind', async (c) => {
+  const auth = await getAuthenticatedUser(c);
+  if (!auth) {
+    return unauthorized(c);
+  }
+
+  if (!auth.supabaseAccessToken) {
+    return c.json({ message: 'Sessão autenticada sem contexto válido da plataforma.' }, 401);
+  }
+
+  const kind = c.req.param('kind');
+  if (kind !== 'avatar' && kind !== 'banner') {
+    return c.json({ message: 'Tipo de upload invalido.' }, 400);
+  }
+
+  if (kind === 'banner' && auth.user.role !== 'freelancer') {
+    return forbidden(c, 'Apenas freelancers podem atualizar o banner do perfil.');
+  }
+
+  const formData = await c.req.formData().catch(() => null);
+  const uploadedFile = formData?.get('file');
+  if (!uploadedFile || typeof uploadedFile === 'string') {
+    return c.json({ message: 'Envie um arquivo de imagem valido.' }, 400);
+  }
+
+  const uploadResult = await uploadSupabaseProfileAsset({
+    accessToken: auth.supabaseAccessToken,
+    file: uploadedFile,
+    kind,
+    userId: auth.user.id,
+  });
+
+  if (!uploadResult.ok) {
+    return c.json(
+      { message: uploadResult.message },
+      uploadResult.reason === 'invalid_file'
+        ? 400
+        : uploadResult.reason === 'not_configured'
+          ? 503
+          : 502,
+    );
+  }
+
+  if (kind === 'avatar') {
+    const updated = await updateSupabaseProfileAvatarUrl({
+      userId: auth.user.id,
+      accessToken: auth.supabaseAccessToken,
+      avatarUrl: uploadResult.publicUrl,
+    });
+
+    if (!updated) {
+      return c.json(
+        { message: 'A imagem foi enviada, mas nao foi possivel atualizar o avatar no perfil.' },
+        502,
+      );
+    }
+  }
+
+  if (kind === 'banner') {
+    const updated = await updateSupabaseFreelancerBannerUrl({
+      userId: auth.user.id,
+      accessToken: auth.supabaseAccessToken,
+      bannerUrl: uploadResult.publicUrl,
+    });
+
+    if (!updated) {
+      return c.json(
+        { message: 'A imagem foi enviada, mas nao foi possivel atualizar o banner no perfil.' },
+        502,
+      );
+    }
+  }
+
+  return c.json(
+    envelope<ProfileAssetUploadResponse>(
+      {
+        kind,
+        publicUrl: uploadResult.publicUrl,
+        persisted: true,
+      },
+      kind === 'avatar'
+        ? 'Foto de perfil atualizada com sucesso.'
+        : 'Banner do perfil atualizado com sucesso.',
+    ),
+  );
 });
 
 app.post('/api/auth/register/client', async (c) => {
@@ -384,102 +518,92 @@ app.post('/api/auth/register/client', async (c) => {
     );
   }
 
-  const email = parsed.data.email.trim().toLowerCase();
-  let userId: string | undefined;
-  let profilesSynced = false;
-  const existingLookup = await findSessionUserByEmail(email);
-  const canIgnoreLegacySupabaseShadow =
-    existingLookup?.source === 'legacy' &&
-    isSupabaseAuthEnabled() &&
-    isSupabaseManagedUserId(existingLookup.user.id);
+  if (!isSupabaseAuthEnabled()) {
+    return c.json({ message: 'Cadastro disponível apenas após a configuração da plataforma.' }, 503);
+  }
 
-  if (existingLookup && !canIgnoreLegacySupabaseShadow) {
+  const email = parsed.data.email.trim().toLowerCase();
+  const location = splitLocation(parsed.data.location);
+  const existingLookup = await findSessionUserByEmail(email);
+  if (existingLookup) {
     return c.json({ message: 'Já existe uma conta com este e-mail.' }, 409);
   }
 
-  if (isSupabaseAuthEnabled()) {
-    const authResult = await registerSupabaseUser({
-      email,
-      password: parsed.data.password,
-      name: parsed.data.name,
-      role: 'client',
-    });
-
-    if (!authResult.ok) {
-      return c.json(
-        { message: authResult.message },
-        authResult.reason === 'already_registered' ? 409 : 502,
-      );
-    }
-
-    if (!authResult.userId) {
-      return c.json({ message: 'Não foi possível identificar a conta criada no Supabase.' }, 502);
-    }
-
-    userId = authResult.userId;
-    if (authResult.accessToken) {
-      const location = splitLocation(parsed.data.location);
-      profilesSynced = await createSupabaseUserProfiles({
-        id: userId,
-        email,
-        role: 'client',
-        fullName: parsed.data.name,
-        accessToken: authResult.accessToken,
-        phone: parsed.data.phone,
-        city: location.city,
-        state: location.state,
-      });
-    }
-  } else {
-    userId = getNextClientId();
-  }
-
-  if (!userId) {
-    return c.json({ message: 'Não foi possível reservar um identificador para a conta.' }, 502);
-  }
-
-  if (canIgnoreLegacySupabaseShadow && existingLookup) {
-    purgeLegacyUserShadow({
-      id: existingLookup.user.id,
-      email,
-      role: existingLookup.user.role,
-    });
-  }
-
-  if (!profilesSynced) {
-    // Compatibility-only local shadow:
-    // active when email confirmation prevents an authenticated write to client_profiles at sign-up.
-    createLegacyClientShadow({
-      profile: {
-        id: userId,
-        name: parsed.data.name,
-        email,
-        phone: parsed.data.phone,
-        location: parsed.data.location,
-        createdAt: new Date().toISOString(),
-      },
-      // Supabase-managed sign-ups keep only a profile shadow here, never a local login secret.
-      passwordHash: isSupabaseAuthEnabled() ? '' : createPasswordHash(parsed.data.password),
-    });
-  }
-
-  const session = createSession({
-    userId,
+  const authResult = await registerSupabaseUser({
+    email,
+    password: parsed.data.password,
+    name: parsed.data.name,
     role: 'client',
+    metadata: {
+      cep: parsed.data.cep,
+      phone: parsed.data.phone,
+      city: location.city,
+      state: location.state,
+    },
   });
 
-  setSessionCookie(session.token, c);
+  if (!authResult.ok) {
+    return c.json(
+      { message: authResult.message },
+      authResult.reason === 'already_registered' ? 409 : 502,
+    );
+  }
+
+  if (!authResult.userId) {
+    return c.json({ message: 'Não foi possível identificar a conta criada.' }, 502);
+  }
+
+  if (authResult.accessToken) {
+    await createSupabaseUserProfiles({
+      id: authResult.userId,
+      email,
+      role: 'client',
+      fullName: parsed.data.name,
+      accessToken: authResult.accessToken,
+      phone: parsed.data.phone,
+      city: location.city,
+      state: location.state,
+      client: {
+        cep: parsed.data.cep,
+      },
+    });
+  }
+
+  const sessionUser = (authResult.accessToken
+    ? await ensureSupabaseSessionUserAfterAuth({
+        authResult,
+        email,
+      })
+    : null) ?? null;
+
+  if (authResult.accessToken && !sessionUser) {
+    return c.json(
+      { message: 'Conta criada, mas o perfil ainda não ficou disponível.' },
+      409,
+    );
+  }
+
+  if (sessionUser) {
+    const session = createSession({
+      userId: sessionUser.id,
+      role: sessionUser.role,
+      supabaseAccessToken: authResult.accessToken,
+      supabaseRefreshToken: authResult.refreshToken,
+      supabaseAccessTokenExpiresAt: authResult.accessTokenExpiresAt,
+    });
+
+    setSessionCookie(session.token, c);
+  }
 
   return c.json(
-    envelope<{ user: SessionUser }>(
+    envelope<RegistrationResponse>(
       {
-        user: {
-          id: userId,
-          name: parsed.data.name,
-          role: 'client',
-        },
+        user: sessionUser,
+        requiresEmailConfirmation: !sessionUser,
       },
-      'Conta de cliente criada com sucesso.',
+      sessionUser
+        ? 'Conta de cliente criada com sucesso.'
+        : 'Conta criada com sucesso. Confirme seu e-mail antes do primeiro login.',
     ),
     201,
   );
@@ -499,159 +623,107 @@ app.post('/api/auth/register/freelancer', async (c) => {
     );
   }
 
-  const email = parsed.data.email.trim().toLowerCase();
-  const hasCnpj = parsed.data.hasCnpj === 'Sim';
-  const selectedPlan = freelancerPlanCatalog[parsed.data.subscriptionTier];
-  const selectedPlanPrice = getFreelancerPlanPrice(parsed.data.subscriptionTier, hasCnpj);
-  let userId: string | undefined;
-  let profilesSynced = false;
-  const existingLookup = await findSessionUserByEmail(email);
-  const canIgnoreLegacySupabaseShadow =
-    existingLookup?.source === 'legacy' &&
-    isSupabaseAuthEnabled() &&
-    isSupabaseManagedUserId(existingLookup.user.id);
+  if (!isSupabaseAuthEnabled()) {
+    return c.json({ message: 'Cadastro disponível apenas após a configuração da plataforma.' }, 503);
+  }
 
-  if (existingLookup && !canIgnoreLegacySupabaseShadow) {
+  const email = parsed.data.email.trim().toLowerCase();
+  const selectedPlan = freelancerPlanCatalog[parsed.data.subscriptionTier];
+  const location = splitLocation(parsed.data.location);
+  const existingLookup = await findSessionUserByEmail(email);
+  if (existingLookup) {
     return c.json({ message: 'Já existe uma conta com este e-mail.' }, 409);
   }
 
-  if (isSupabaseAuthEnabled()) {
-    const authResult = await registerSupabaseUser({
-      email,
-      password: parsed.data.password,
-      name: parsed.data.name,
-      role: 'freelancer',
-    });
-
-    if (!authResult.ok) {
-      return c.json(
-        { message: authResult.message },
-        authResult.reason === 'already_registered' ? 409 : 502,
-      );
-    }
-
-    if (!authResult.userId) {
-      return c.json({ message: 'Não foi possível identificar a conta criada no Supabase.' }, 502);
-    }
-
-    userId = authResult.userId;
-    if (authResult.accessToken) {
-      const location = splitLocation(parsed.data.location);
-      profilesSynced = await createSupabaseUserProfiles({
-        id: userId,
-        email,
-        role: 'freelancer',
-        fullName: parsed.data.name,
-        accessToken: authResult.accessToken,
-        avatarUrl: parsed.data.avatarUrl || undefined,
-        phone: parsed.data.phone,
-        city: location.city,
-        state: location.state,
-        bio: parsed.data.summary,
-        freelancer: {
-          professionalTitle: parsed.data.profession,
-          experienceLevel: parsed.data.experienceLevel,
-          skills: [parsed.data.profession, parsed.data.category, 'Atendimento direto'],
-          hourlyRate: parsed.data.averagePrice,
-          portfolioUrl:
-            parsed.data.portfolioUrl || parsed.data.websiteUrl || 'https://www.linkedin.com/',
-          availabilityStatus: 'available',
-        },
-      });
-    }
-  } else {
-    userId = getNextFreelancerId();
-  }
-
-  if (!userId) {
-    return c.json({ message: 'Não foi possível reservar um identificador para a conta.' }, 502);
-  }
-
-  if (canIgnoreLegacySupabaseShadow && existingLookup) {
-    purgeLegacyUserShadow({
-      id: existingLookup.user.id,
-      email,
-      role: existingLookup.user.role,
-    });
-  }
-
-  const baseSlug = `${slugify(parsed.data.name)}-${slugify(parsed.data.profession)}`;
-  // Operational/showcase shadow:
-  // even with canonical identity in Supabase, the freelancer still needs local extras
-  // that are outside the Block 1 schema, such as subscription, metrics, slug and banner.
-  createLegacyFreelancerShadow({
+  const authResult = await registerSupabaseUser({
     email,
-    hasCnpj,
-    phone: parsed.data.phone,
-    // Supabase-managed sign-ups must not authenticate from local residue.
-    passwordHash: isSupabaseAuthEnabled() ? '' : createPasswordHash(parsed.data.password),
-    profile: {
-      id: userId,
-      slug: profilesSynced
-        ? createPublicSlug(parsed.data.name, userId)
-        : ensureUniqueFreelancerSlug(baseSlug),
-      name: parsed.data.name,
+    password: parsed.data.password,
+    name: parsed.data.name,
+    role: 'freelancer',
+    metadata: {
+      phone: parsed.data.phone,
+      city: location.city,
+      state: location.state,
+      avatar_url: parsed.data.avatarUrl || undefined,
+      banner_url: parsed.data.bannerUrl || undefined,
+      summary: parsed.data.summary,
       profession: parsed.data.profession,
       category: parsed.data.category,
-      summary: parsed.data.summary,
-      description: parsed.data.description,
-      location: parsed.data.location,
-      experienceLevel: parsed.data.experienceLevel,
-      yearsExperience: parsed.data.yearsExperience,
-      averagePrice: parsed.data.averagePrice,
-      skills: [parsed.data.profession, parsed.data.category, 'Atendimento direto'],
-      portfolio: [
-        {
-          title: 'Portfólio principal',
-          description: 'Link informado pelo profissional no momento do cadastro.',
-          url: parsed.data.portfolioUrl || parsed.data.websiteUrl || 'https://www.linkedin.com/',
-        },
-      ],
-      avatarUrl:
-        parsed.data.avatarUrl ||
-        'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=400&q=80',
-      bannerUrl:
-        parsed.data.bannerUrl ||
-        'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1400&q=80',
-      linkedinUrl: parsed.data.linkedinUrl || undefined,
-      websiteUrl: parsed.data.websiteUrl || undefined,
-      whatsapp: parsed.data.phone.replace(/\D/g, ''),
-      verified: false,
-      availability: 'Perfil recém-publicado. Defina sua disponibilidade no painel.',
-      memberSince: new Date().toISOString(),
-    },
-    subscription: {
-      tier: parsed.data.subscriptionTier,
-      name: selectedPlan.name,
-      priceMonthly: selectedPlanPrice,
-      status: 'active',
-      startedAt: new Date().toISOString(),
-      endsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    metrics: {
-      profileViews: 0,
-      contactClicks: 0,
-      messagesReceived: 0,
+      experience_level: parsed.data.experienceLevel,
+      portfolio_url: parsed.data.portfolioUrl || parsed.data.websiteUrl || undefined,
     },
   });
 
-  const session = createSession({
-    userId,
-    role: 'freelancer',
-  });
+  if (!authResult.ok) {
+    return c.json(
+      { message: authResult.message },
+      authResult.reason === 'already_registered' ? 409 : 502,
+    );
+  }
 
-  setSessionCookie(session.token, c);
+  if (!authResult.userId) {
+    return c.json({ message: 'Não foi possível identificar a conta criada.' }, 502);
+  }
+
+  if (authResult.accessToken) {
+    await createSupabaseUserProfiles({
+      id: authResult.userId,
+      email,
+      role: 'freelancer',
+      fullName: parsed.data.name,
+      accessToken: authResult.accessToken,
+      avatarUrl: parsed.data.avatarUrl || undefined,
+      phone: parsed.data.phone,
+      city: location.city,
+      state: location.state,
+      bio: parsed.data.summary,
+      freelancer: {
+        professionalTitle: parsed.data.profession,
+        experienceLevel: parsed.data.experienceLevel,
+        skills: [parsed.data.profession, parsed.data.category, 'Atendimento direto'],
+        portfolioUrl:
+          parsed.data.portfolioUrl || parsed.data.websiteUrl || 'https://www.linkedin.com/',
+        bannerUrl: parsed.data.bannerUrl || undefined,
+        availabilityStatus: 'available',
+      },
+    });
+  }
+
+  const sessionUser = (authResult.accessToken
+    ? await ensureSupabaseSessionUserAfterAuth({
+        authResult,
+        email,
+      })
+    : null) ?? null;
+
+  if (authResult.accessToken && !sessionUser) {
+    return c.json(
+      { message: 'Perfil criado, mas a conta ainda não ficou disponível.' },
+      409,
+    );
+  }
+
+  if (sessionUser) {
+    const session = createSession({
+      userId: sessionUser.id,
+      role: sessionUser.role,
+      supabaseAccessToken: authResult.accessToken,
+      supabaseRefreshToken: authResult.refreshToken,
+      supabaseAccessTokenExpiresAt: authResult.accessTokenExpiresAt,
+    });
+
+    setSessionCookie(session.token, c);
+  }
 
   return c.json(
-    envelope<{ user: SessionUser }>(
+    envelope<RegistrationResponse>(
       {
-        user: {
-          id: userId,
-          name: parsed.data.name,
-          role: 'freelancer',
-        },
+        user: sessionUser,
+        requiresEmailConfirmation: !sessionUser,
       },
-      `Cadastro concluído. ${selectedPlan.name} já está pronto para ativação.`,
+      sessionUser
+        ? `Cadastro concluído. ${selectedPlan.name} já está pronto para ativação.`
+        : 'Perfil criado com sucesso. Confirme seu e-mail antes do primeiro login.',
     ),
     201,
   );
@@ -672,103 +744,49 @@ app.post('/api/auth/login', async (c) => {
   }
 
   const normalizedEmail = parsed.data.email.trim().toLowerCase();
-  let lookup = await findSessionUserByEmail(normalizedEmail);
-  if (!lookup && !isSupabaseAuthEnabled()) {
-    return c.json({ message: 'Usuário não encontrado.' }, 404);
+  if (!isSupabaseAuthEnabled()) {
+    return c.json({ message: 'Login disponível apenas após a configuração da plataforma.' }, 503);
   }
 
-  const isSupabaseManagedLegacyLookup =
-    lookup?.source === 'legacy' &&
-    isSupabaseAuthEnabled() &&
-    isSupabaseManagedUserId(lookup.user.id);
-  const localPasswordHash = lookup?.passwordHash;
-  const passwordMatchesLocalHash = localPasswordHash
-    ? verifyPassword(parsed.data.password, localPasswordHash)
-    : false;
-  let sessionUser: SessionUser | undefined = lookup?.user;
+  const authResult = await authenticateWithSupabase({
+    email: normalizedEmail,
+    password: parsed.data.password,
+  });
 
-  if (isSupabaseAuthEnabled()) {
-    const authResult = await authenticateWithSupabase({
-      email: normalizedEmail,
-      password: parsed.data.password,
-    });
-
-    if (!authResult.ok) {
-      if (isSupabaseManagedLegacyLookup) {
-        return c.json(
-          { message: authResult.message },
-          authResult.reason === 'invalid_credentials' ? 401 : 502,
-        );
-      }
-
-      if (!passwordMatchesLocalHash) {
-        return c.json(
-          { message: authResult.message },
-          authResult.reason === 'invalid_credentials' ? 401 : 502,
-        );
-      }
-
-      if (lookup?.source === 'legacy') {
-        const migrationResult = await registerSupabaseUser({
-          email: normalizedEmail,
-          password: parsed.data.password,
-          name: lookup.user.name,
-          role: lookup.user.role,
-        });
-
-        if (!migrationResult.ok && migrationResult.reason !== 'already_registered') {
-          return c.json({ message: migrationResult.message }, 502);
-        }
-
-        if (!migrationResult.ok) {
-          const refreshedLookup = await findSessionUserByEmail(normalizedEmail);
-          if (refreshedLookup) {
-            sessionUser = refreshedLookup.user;
-          }
-        } else {
-          sessionUser =
-            (await ensureSupabaseSessionUserAfterAuth({
-              authResult: migrationResult,
-              email: normalizedEmail,
-              lookup,
-            })) ??
-            sessionUser;
-        }
-      }
-    } else {
-      sessionUser = await ensureSupabaseSessionUserAfterAuth({
-        authResult,
-        email: normalizedEmail,
-        lookup,
-      });
-
-      if (!sessionUser) {
-        return c.json(
-          {
-            message:
-              'Conta autenticada, mas o perfil da aplicaÃ§Ã£o ainda nÃ£o foi concluÃ­do. Finalize o cadastro ou sincronize o perfil no Supabase.',
-          },
-          409,
-        );
-      }
-    }
-  } else if (!passwordMatchesLocalHash) {
-    return c.json({ message: 'Senha incorreta.' }, 401);
+  if (!authResult.ok) {
+    return c.json(
+      { message: authResult.message },
+      authResult.reason === 'invalid_credentials' ? 401 : 502,
+    );
   }
+
+  const sessionUser = await ensureSupabaseSessionUserAfterAuth({
+    authResult,
+    email: normalizedEmail,
+  });
 
   if (!sessionUser) {
-    return c.json({ message: 'UsuÃ¡rio nÃ£o encontrado.' }, 404);
+    return c.json(
+      {
+        message:
+          'Conta autenticada, mas o perfil da aplicação ainda não foi concluído. Finalize o cadastro ou sincronize o perfil.',
+      },
+      409,
+    );
   }
 
   const session = createSession({
     userId: sessionUser.id,
     role: sessionUser.role,
+    supabaseAccessToken: authResult.accessToken,
+    supabaseRefreshToken: authResult.refreshToken,
+    supabaseAccessTokenExpiresAt: authResult.accessTokenExpiresAt,
   });
 
   setSessionCookie(session.token, c);
 
   return c.json(
-    envelope(
+    envelope<AuthSessionPayload>(
       {
         user: sessionUser,
       },
@@ -798,7 +816,7 @@ app.get('/api/dashboard/freelancer', async (c) => {
     return forbidden(c, 'Apenas freelancers podem acessar este dashboard.');
   }
 
-  const dashboard = await getFreelancerDashboard(auth.user.id);
+  const dashboard = await getFreelancerDashboard(auth.user.id, auth.supabaseAccessToken ?? undefined);
   if (!dashboard) {
     return c.json({ message: 'Dashboard do freelancer não encontrado.' }, 404);
   }
@@ -816,12 +834,30 @@ app.get('/api/dashboard/client', async (c) => {
     return forbidden(c, 'Apenas clientes podem acessar este dashboard.');
   }
 
-  const dashboard = await getClientDashboard(auth.user.id);
+  const dashboard = await getClientDashboard(auth.user.id, auth.supabaseAccessToken ?? undefined);
   if (!dashboard) {
     return c.json({ message: 'Dashboard do cliente não encontrado.' }, 404);
   }
 
   return c.json(envelope(dashboard));
+});
+
+app.get('/api/messages', async (c) => {
+  const auth = await getAuthenticatedUser(c);
+  if (!auth) {
+    return unauthorized(c);
+  }
+
+  const inbox = await getConversationInbox(
+    auth.user.id,
+    auth.user.role,
+    auth.supabaseAccessToken ?? undefined,
+  );
+  if (!inbox) {
+    return c.json({ message: 'Central de mensagens não encontrada.' }, 404);
+  }
+
+  return c.json(envelope(inbox));
 });
 
 app.post('/api/contacts', async (c) => {
@@ -834,7 +870,7 @@ app.post('/api/contacts', async (c) => {
     return forbidden(c, 'Apenas clientes podem enviar contatos pela plataforma.');
   }
 
-  const client = await findClientRecordById(auth.user.id);
+  const client = await findClientRecordById(auth.user.id, auth.supabaseAccessToken ?? undefined);
   if (!client) {
     return c.json({ message: 'Conta de cliente não encontrada.' }, 404);
   }
@@ -861,11 +897,7 @@ app.post('/api/contacts', async (c) => {
     return c.json({ message: 'Este freelancer não está disponível para novos contatos.' }, 409);
   }
 
-  const contactId = `contact-${Date.now()}`;
-  const createdAt = new Date().toISOString();
-
-  const contact: ContactMessage = {
-    id: contactId,
+  const result = createOrContinueContact({
     freelancerId: freelancerRecord.profile.id,
     freelancerName: freelancerRecord.profile.name,
     freelancerEmail: freelancerRecord.email,
@@ -876,23 +908,19 @@ app.post('/api/contacts', async (c) => {
     clientPhone: client.profile.phone,
     subject: parsed.data.subject,
     message: parsed.data.message,
-    channel: parsed.data.channel,
-    createdAt,
+    channel: platformContactChannel,
     status: 'Novo',
-    messages: [
-      {
-        id: `${contactId}-message-1`,
-        senderRole: 'client',
-        senderName: client.profile.name,
-        body: parsed.data.message,
-        createdAt,
-      },
-    ],
-  };
+  });
 
-  addContact(contact);
-
-  return c.json(envelope(contact, 'Contato registrado com sucesso.'), 201);
+  return c.json(
+    envelope(
+      result.contact,
+      result.created
+        ? 'Chat iniciado com sucesso.'
+        : 'Mensagem adicionada ao histórico da conversa existente.',
+    ),
+    result.created ? 201 : 200,
+  );
 });
 
 app.post('/api/contacts/:contactId/messages', async (c) => {
@@ -906,20 +934,17 @@ app.post('/api/contacts/:contactId/messages', async (c) => {
     return c.json({ message: 'Conversa não encontrada.' }, 404);
   }
 
-  if (contact.channel !== 'Plataforma') {
-    return c.json({ message: 'Este contato segue pelo canal de e-mail.' }, 409);
-  }
-
   if (
     auth.user.role === 'freelancer' &&
     contact.freelancerId !== auth.user.id &&
-    contact.freelancerEmail !== (await findFreelancerRecordById(auth.user.id))?.email
+    contact.freelancerEmail !==
+      (await findFreelancerRecordById(auth.user.id, auth.supabaseAccessToken ?? undefined))?.email
   ) {
     return forbidden(c, 'Você não pode responder esta conversa.');
   }
 
   if (auth.user.role === 'client') {
-    const client = await findClientRecordById(auth.user.id);
+    const client = await findClientRecordById(auth.user.id, auth.supabaseAccessToken ?? undefined);
     if (!client) {
       return c.json({ message: 'Conta de cliente não encontrada.' }, 404);
     }

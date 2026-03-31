@@ -1,10 +1,11 @@
-import type { ChangeEvent } from 'react';
+import type { ChangeEvent, KeyboardEvent } from 'react';
 
 interface FormFieldProps {
   label: string;
   name: string;
   value: string;
   onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
+  onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   type?: string;
   error?: string;
@@ -16,7 +17,7 @@ interface FormFieldProps {
 }
 
 const fieldClassName =
-  'w-full rounded-2xl border border-slate-200/90 bg-white/90 px-4 py-3 text-sm text-slate-900 outline-none transition duration-200 placeholder:text-slate-400 focus:border-cyan-400 focus:ring-4 focus:ring-cyan-400/10';
+  'w-full rounded-2xl border border-slate-200/80 bg-white/92 px-4 py-3 text-sm text-slate-900 outline-none transition duration-200 placeholder:text-slate-400 focus:border-[#0071e3]/50 focus:ring-4 focus:ring-[#0071e3]/10';
 
 export function FormField({
   error,
@@ -24,6 +25,7 @@ export function FormField({
   min,
   name,
   onChange,
+  onKeyDown,
   optional,
   options,
   placeholder,
@@ -37,7 +39,7 @@ export function FormField({
       <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
         {label}
         {optional ? (
-          <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-slate-400">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
             Opcional
           </span>
         ) : null}
@@ -57,6 +59,7 @@ export function FormField({
           className={`${fieldClassName} min-h-[140px] resize-y`}
           name={name}
           onChange={onChange}
+          onKeyDown={onKeyDown}
           placeholder={placeholder}
           value={value}
         />

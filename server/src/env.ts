@@ -60,4 +60,5 @@ export const serverEnv = {
   supabaseUrl: readEnv('VITE_SUPABASE_URL'),
   supabasePublishableKey:
     readEnv('VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY') ?? readEnv('VITE_SUPABASE_ANON_KEY'),
+  supabaseServiceRoleKey: readEnv('SUPABASE_SERVICE_ROLE_KEY'),
 };

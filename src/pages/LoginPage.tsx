@@ -3,8 +3,10 @@ import { Link, useLocation, useNavigate, type Location } from 'react-router-dom'
 
 import { loginSchema } from '../../shared/schemas';
 import { FormField } from '../components/FormField';
+import { InstitutionalSupportNote } from '../components/InstitutionalSupportNote';
 import { useAppSession } from '../context/AppSessionContext';
 import { api } from '../lib/api';
+import { passwordSupportMailto } from '../lib/institutional';
 import { getFieldErrors } from '../lib/validation';
 
 type LoginState = {
@@ -14,25 +16,27 @@ type LoginState = {
 
 type LoginLocationState = {
   from?: Location;
-};
-
-const initialState: LoginState = {
-  email: '',
-  password: '',
+  email?: string;
+  registrationMessage?: string;
 };
 
 export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { setSession } = useAppSession();
-  const [form, setForm] = useState(initialState);
+  const locationState = (location.state as LoginLocationState | null) ?? null;
+  const [form, setForm] = useState<LoginState>({
+    email: locationState?.email ?? '',
+    password: '',
+  });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(locationState?.registrationMessage ?? null);
+  const [statusTone, setStatusTone] = useState<'error' | 'success'>(
+    locationState?.registrationMessage ? 'success' : 'error',
+  );
   const [loading, setLoading] = useState(false);
 
-  const redirectTarget =
-    (location.state as LoginLocationState | null)?.from ??
-    null;
+  const redirectTarget = locationState?.from ?? null;
 
   function handleChange(
     event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -44,6 +48,7 @@ export function LoginPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus(null);
+    setStatusTone('error');
 
     const parsed = loginSchema.safeParse(form);
     if (!parsed.success) {
@@ -63,37 +68,72 @@ export function LoginPage() {
       );
     } catch (submitError) {
       setStatus(submitError instanceof Error ? submitError.message : 'Não foi possível entrar.');
+      setStatusTone('error');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="container grid gap-10 py-14 lg:grid-cols-[0.9fr_1.1fr]">
+    <div className="container grid gap-10 py-16 lg:grid-cols-[0.92fr_1.08fr]">
       <section className="space-y-6">
-        <span className="inline-flex rounded-full border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-700">
+        <span className="inline-flex rounded-full border border-slate-200 bg-white/88 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
           Acesso
         </span>
-        <h1 className="text-4xl font-extrabold tracking-tight text-slate-950">
-          Acesse sua conta para destravar preços, contatos e monitoramento operacional.
+        <h1 className="text-4xl font-semibold tracking-[-0.05em] text-slate-950 sm:text-5xl">
+          Entre na sua conta para acompanhar pedidos, conversas e serviços com facilidade.
         </h1>
-        <p className="text-base leading-7 text-slate-600">
-          Clientes liberam valores médios e criam contatos reais no sistema. Freelancers acompanham
-          leads, assinatura e sinais de interesse no painel profissional.
+        <p className="max-w-xl text-[1.02rem] leading-7 text-slate-500">
+          Aqui você encontra tudo em um lugar só: conversa, interesse recebido, pedidos em
+          andamento e acesso ao que foi liberado para a sua conta.
         </p>
 
-        <div className="glass-panel tech-panel rounded-[30px] p-6 shadow-soft">
-          <p className="font-mono text-sm font-semibold uppercase tracking-[0.18em] text-cyan-700">
+        <div className="rounded-[34px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(246,249,255,0.96)_100%)] p-7 shadow-[0_20px_55px_rgba(15,23,42,0.05)]">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0071e3]">
+              Jump freelancer
+            </p>
+            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Direto
+            </span>
+          </div>
+
+          <h2 className="mt-4 text-2xl font-semibold tracking-[-0.03em] text-slate-950">
+            Quer começar a divulgar seus serviços?
+          </h2>
+          <p className="mt-3 text-sm leading-7 text-slate-600">
+            Se você presta serviço na rua, na obra, no escritório, no estúdio ou online, pode ir
+            direto para o cadastro freelancer, escolher o plano e ativar seu perfil profissional.
+          </p>
+
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Link
+              className="rounded-full bg-[#0071e3] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0077ed]"
+              to="/cadastro/freelancer"
+            >
+              Ir para cadastro freelancer
+            </Link>
+            <Link
+              className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              to="/cadastro/cliente"
+            >
+              Criar conta de cliente
+            </Link>
+          </div>
+        </div>
+
+        <div className="glass-panel tech-panel rounded-[30px] p-6">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
             Estado de sessão
           </p>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            O login agora usa cookie HTTP-only, o que permite proteger dashboards e liberar dados
-            sensíveis do perfil apenas para o tipo correto de usuário.
+            O acesso usa a autenticação da plataforma para liberar dashboards, conversa e
+            permissões conforme o tipo correto de usuário.
           </p>
         </div>
       </section>
 
-      <section className="glass-panel tech-panel rounded-[32px] p-6 shadow-soft lg:p-8">
+      <section className="glass-panel tech-panel rounded-[34px] p-6 lg:p-8">
         <form className="grid gap-5" onSubmit={handleSubmit}>
           <FormField
             error={errors.email}
@@ -113,13 +153,19 @@ export function LoginPage() {
           />
 
           {status ? (
-            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <div
+              className={`rounded-2xl px-4 py-3 text-sm ${
+                statusTone === 'success'
+                  ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border border-rose-200 bg-rose-50 text-rose-700'
+              }`}
+            >
               {status}
             </div>
           ) : null}
 
           <button
-            className="rounded-full bg-slate-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            className="rounded-full bg-[#0071e3] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:bg-slate-300"
             disabled={loading}
             type="submit"
           >
@@ -128,31 +174,41 @@ export function LoginPage() {
         </form>
 
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 text-sm">
-          <button className="font-semibold text-cyan-700" type="button">
+          <a
+            className="font-semibold text-[#0071e3] transition hover:text-[#0077ed]"
+            href={passwordSupportMailto}
+          >
             Esqueci minha senha
-          </button>
-          <div className="text-slate-500">
-            Não tem conta?{' '}
-            <Link className="font-semibold text-cyan-700" to="/cadastro/cliente">
+          </a>
+          <div className="flex flex-wrap items-center gap-3 text-slate-500">
+            <span>Não tem conta?</span>
+            <Link className="font-semibold text-[#0071e3]" to="/cadastro/cliente">
               Criar conta
+            </Link>
+            <Link
+              className="rounded-full bg-[#0071e3]/8 px-3 py-1.5 font-semibold text-[#0071e3] transition hover:bg-[#0071e3]/12"
+              to="/cadastro/freelancer"
+            >
+              Virar freelancer
             </Link>
           </div>
         </div>
 
-        <div className="mt-8 rounded-[28px] border border-slate-200 bg-white p-5">
-          <p className="font-mono text-sm font-semibold uppercase tracking-[0.18em] text-slate-700">
-            Contas de demonstração
+        <div className="mt-8 rounded-[28px] border border-slate-200/80 bg-white/92 p-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Autenticação da plataforma
           </p>
           <p className="mt-2 text-sm leading-6 text-slate-500">
-            Cliente: <span className="font-medium text-slate-700">marina@cliente.com</span> / senha{' '}
-            <span className="font-medium text-slate-700">123456</span>
-          </p>
-          <p className="mt-1 text-sm leading-6 text-slate-500">
-            Freelancer: <span className="font-medium text-slate-700">aline@facofreela.com</span> / senha{' '}
-            <span className="font-medium text-slate-700">123456</span>
+            O acesso da plataforma depende da sua conta autenticada. Se o projeto exigir
+            confirmação de e-mail, conclua essa etapa antes do primeiro login.
           </p>
         </div>
+
+        <InstitutionalSupportNote className="mt-4" compact />
       </section>
     </div>
   );
 }
+
+
+

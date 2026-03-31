@@ -1,29 +1,17 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 
-import type { ClientDashboard, ContactMessage } from '../../shared/contracts';
+import type { ClientDashboard } from '../../shared/contracts';
 import { FreelancerCard } from '../components/FreelancerCard';
+import { useChat } from '../context/ChatContext';
 import { api } from '../lib/api';
+import { getConversationPeerName, getLatestMessage } from '../lib/chat';
 import { shortDateTime } from '../lib/format';
 
-type ReplyStatus = {
-  tone: 'error' | 'success';
-  text: string;
-};
-
-function replaceContact(
-  contacts: ContactMessage[],
-  updatedContact: ContactMessage,
-): ContactMessage[] {
-  return contacts.map((contact) => (contact.id === updatedContact.id ? updatedContact : contact));
-}
-
 export function ClientDashboardPage() {
+  const { contacts, notifications } = useChat();
   const [dashboard, setDashboard] = useState<ClientDashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeContactId, setActiveContactId] = useState<string | null>(null);
-  const [replyMessage, setReplyMessage] = useState('');
-  const [replyStatus, setReplyStatus] = useState<ReplyStatus | null>(null);
-  const [submittingReply, setSubmittingReply] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -36,7 +24,6 @@ export function ClientDashboardPage() {
 
         if (!controller.signal.aborted) {
           setDashboard(data);
-          setActiveContactId((current) => current ?? data.recentContacts[0]?.id ?? null);
           setError(null);
         }
       } catch (loadError) {
@@ -73,77 +60,42 @@ export function ClientDashboardPage() {
     );
   }
 
-  const activeContact =
-    dashboard.recentContacts.find((contact) => contact.id === activeContactId) ??
-    dashboard.recentContacts[0] ??
-    null;
-
-  async function handleReplySubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!activeContact || activeContact.channel !== 'Plataforma') {
-      return;
-    }
-
-    const trimmedMessage = replyMessage.trim();
-    if (!trimmedMessage) {
-      setReplyStatus({
-        tone: 'error',
-        text: 'Escreva sua mensagem antes de enviar.',
-      });
-      return;
-    }
-
-    setSubmittingReply(true);
-    setReplyStatus(null);
-
-    try {
-      const updatedContact = await api.sendContactMessage(activeContact.id, {
-        message: trimmedMessage,
-      });
-
-      setDashboard((current) =>
-        current
-          ? {
-              ...current,
-              recentContacts: replaceContact(current.recentContacts, updatedContact),
-            }
-          : current,
-      );
-      setReplyMessage('');
-      setReplyStatus({
-        tone: 'success',
-        text: 'Mensagem enviada no chat da plataforma.',
-      });
-    } catch (submitError) {
-      setReplyStatus({
-        tone: 'error',
-        text:
-          submitError instanceof Error
-            ? submitError.message
-            : 'Não foi possível enviar sua mensagem agora.',
-      });
-    } finally {
-      setSubmittingReply(false);
-    }
-  }
-
   return (
     <div className="container space-y-10 py-14">
       <section className="glass-panel rounded-[36px] p-8 shadow-soft">
-        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-600">
-          Dashboard do cliente
-        </p>
-        <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-slate-950">
-          {dashboard.profile.name}, acompanhe seus favoritos e suas conversas.
-        </h1>
-        <p className="mt-4 max-w-3xl text-base leading-7 text-slate-600">
-          Sua conta está ativa em {dashboard.profile.location}. Aqui você continua no chat da
-          plataforma quando quiser manter tudo organizado em um só lugar.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-6">
+          <div className="max-w-3xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-600">
+              Dashboard do cliente
+            </p>
+            <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-slate-950">
+              {dashboard.profile.name}, acompanhe propostas e respostas sem sair do site.
+            </h1>
+            <p className="mt-4 text-base leading-7 text-slate-600">
+              O fluxo oficial entre cliente e freelancer agora fica concentrado no chat interno da
+              plataforma. O rodapé mostra notificações recebidas e a central de mensagens guarda
+              todo o histórico.
+            </p>
+          </div>
+
+          <div className="grid min-w-[15rem] gap-3">
+            <div className="rounded-[24px] border border-cyan-200 bg-cyan-50 px-5 py-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-cyan-700">Novas respostas</p>
+              <p className="mt-2 text-3xl font-extrabold text-slate-950">
+                {notifications.length}
+              </p>
+            </div>
+            <Link
+              className="rounded-full bg-slate-950 px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-slate-800"
+              to="/mensagens"
+            >
+              Abrir central de mensagens
+            </Link>
+          </div>
+        </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[1fr_0.9fr]">
+      <section className="grid gap-6 lg:grid-cols-[1fr_0.92fr]">
         <article className="glass-panel rounded-[32px] p-7 shadow-soft">
           <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-400">
             Freelancers favoritos
@@ -156,154 +108,78 @@ export function ClientDashboardPage() {
         </article>
 
         <div className="space-y-6">
-          <article className="glass-panel rounded-[32px] p-7 shadow-soft">
+          <article className="rounded-[32px] bg-slate-950 p-7 text-white shadow-soft">
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-400">
-                  Conversas recentes
+                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-200">
+                  Mensagens
                 </p>
-                <h2 className="mt-2 text-2xl font-bold text-slate-950">Mensagens enviadas</h2>
+                <h2 className="mt-2 text-2xl font-bold">Conversas recentes</h2>
               </div>
-              {activeContact ? (
-                <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-                  {activeContact.channel}
-                </span>
-              ) : null}
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-cyan-100">
+                {contacts.length} chats
+              </span>
             </div>
 
             <div className="mt-5 space-y-4">
-              {dashboard.recentContacts.map((contact) => {
-                const isActive = contact.id === activeContact?.id;
+              {contacts.length > 0 ? (
+                contacts.slice(0, 3).map((contact) => {
+                  const latestMessage = getLatestMessage(contact);
 
-                return (
-                  <button
-                    key={contact.id}
-                    className={`w-full rounded-[24px] border p-5 text-left transition ${
-                      isActive
-                        ? 'border-cyan-300/50 bg-cyan-500/8 shadow-soft'
-                        : 'border-slate-200/80 bg-white/80 hover:border-cyan-200'
-                    }`}
-                    onClick={() => {
-                      setActiveContactId(contact.id);
-                      setReplyMessage('');
-                      setReplyStatus(null);
-                    }}
-                    type="button"
-                  >
-                    <p className="text-sm font-semibold text-slate-950">{contact.freelancerName}</p>
-                    <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
-                      {contact.subject}
-                    </p>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">{contact.message}</p>
-                  </button>
-                );
-              })}
+                  return (
+                    <Link
+                      key={contact.id}
+                      className="block rounded-[24px] border border-white/10 bg-white/5 px-5 py-4 transition hover:bg-white/10"
+                      to={`/mensagens?chat=${contact.id}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-white">
+                            {getConversationPeerName(contact, 'client')}
+                          </p>
+                          <p className="truncate text-xs uppercase tracking-[0.16em] text-cyan-200">
+                            {contact.subject}
+                          </p>
+                        </div>
+                        <span className="text-xs text-slate-400">
+                          {shortDateTime(latestMessage?.createdAt ?? contact.createdAt)}
+                        </span>
+                      </div>
+                      <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-300">
+                        {latestMessage?.body ?? contact.message}
+                      </p>
+                    </Link>
+                  );
+                })
+              ) : (
+                <div className="rounded-[24px] border border-white/10 bg-white/5 px-5 py-4 text-sm leading-6 text-slate-300">
+                  Assim que um contato for aberto no perfil de um freelancer, ele aparece aqui e
+                  também na central completa.
+                </div>
+              )}
             </div>
           </article>
 
-          <article className="rounded-[32px] bg-slate-950 p-7 text-white shadow-soft">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-200">
-              Conversa ativa
+          <article className="rounded-[32px] border border-brand-100 bg-brand-50 p-7 shadow-soft">
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-700">
+              Comunicação protegida
             </p>
-
-            {activeContact ? (
-              <div className="mt-5 space-y-4">
-                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-                  <p className="text-sm font-semibold text-white">{activeContact.freelancerName}</p>
-                  <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
-                    {activeContact.subject}
-                  </p>
-                </div>
-
-                <div className="space-y-3">
-                  {activeContact.messages.map((message) => {
-                    const isClientMessage = message.senderRole === 'client';
-
-                    return (
-                      <div
-                        key={message.id}
-                        className={`flex ${isClientMessage ? 'justify-end' : 'justify-start'}`}
-                      >
-                        <div
-                          className={`max-w-[88%] rounded-[24px] px-4 py-3 text-sm ${
-                            isClientMessage
-                              ? 'bg-cyan-400 text-slate-950'
-                              : 'border border-white/10 bg-white/5 text-slate-100'
-                          }`}
-                        >
-                          <p
-                            className={`text-xs font-semibold uppercase tracking-[0.14em] ${
-                              isClientMessage ? 'text-slate-900/70' : 'text-cyan-200'
-                            }`}
-                          >
-                            {isClientMessage ? 'Você' : message.senderName}
-                          </p>
-                          <p className="mt-2 leading-6">{message.body}</p>
-                          <p
-                            className={`mt-3 text-[11px] ${
-                              isClientMessage ? 'text-slate-900/70' : 'text-slate-400'
-                            }`}
-                          >
-                            {shortDateTime(message.createdAt)}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {activeContact.channel === 'Plataforma' ? (
-                  <form className="space-y-4" onSubmit={handleReplySubmit}>
-                    <textarea
-                      className="min-h-[130px] w-full rounded-[24px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-400/10"
-                      onChange={(event) => setReplyMessage(event.target.value)}
-                      placeholder="Continue a conversa sem sair da plataforma."
-                      value={replyMessage}
-                    />
-
-                    {replyStatus ? (
-                      <div
-                        className={`rounded-[22px] px-4 py-3 text-sm ${
-                          replyStatus.tone === 'success'
-                            ? 'border border-emerald-300/30 bg-emerald-500/10 text-emerald-200'
-                            : 'border border-rose-300/30 bg-rose-500/10 text-rose-200'
-                        }`}
-                      >
-                        {replyStatus.text}
-                      </div>
-                    ) : null}
-
-                    <button
-                      className="rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-200"
-                      disabled={submittingReply}
-                      type="submit"
-                    >
-                      {submittingReply ? 'Enviando...' : 'Responder no chat'}
-                    </button>
-                  </form>
-                ) : (
-                  <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
-                    Esta conversa foi aberta no canal de e-mail. O histórico inicial segue salvo
-                    aqui, mas a continuidade acontece pelo correio eletrônico.
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="mt-5 text-sm leading-6 text-slate-300">
-                Escolha um contato para ver a conversa.
-              </p>
-            )}
+            <ul className="mt-5 space-y-3 text-sm leading-6 text-slate-700">
+              <li>O único canal oficial entregue pela plataforma é o chat interno.</li>
+              <li>Notificações recebidas aparecem na dock fixa no rodapé.</li>
+              <li>Se as partes trocarem contatos por conta própria dentro do chat, isso não fica sob responsabilidade da plataforma.</li>
+            </ul>
           </article>
 
-          <article className="rounded-[32px] bg-slate-950 p-7 text-white shadow-soft">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-200">
-              Notificações
+          <article className="glass-panel rounded-[32px] p-7 shadow-soft">
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-400">
+              Avisos da conta
             </p>
-            <ul className="mt-5 space-y-4 text-sm leading-6 text-slate-200">
-              {dashboard.notifications.map((notification) => (
+            <ul className="mt-5 space-y-3 text-sm leading-6 text-slate-600">
+              {[...dashboard.notifications, `${notifications.length} nova(s) resposta(s) aguardando leitura na central.`].map((notification) => (
                 <li
                   key={notification}
-                  className="rounded-[24px] border border-white/10 bg-white/5 px-4 py-4"
+                  className="rounded-[22px] border border-slate-200 bg-white/80 px-4 py-4"
                 >
                   {notification}
                 </li>

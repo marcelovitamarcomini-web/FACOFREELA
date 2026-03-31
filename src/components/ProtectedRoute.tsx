@@ -4,7 +4,7 @@ import type { UserRole } from '../../shared/contracts';
 import { useAppSession } from '../context/AppSessionContext';
 
 interface ProtectedRouteProps {
-  role: UserRole;
+  role?: UserRole | UserRole[];
 }
 
 export function ProtectedRoute({ role }: ProtectedRouteProps) {
@@ -25,7 +25,8 @@ export function ProtectedRoute({ role }: ProtectedRouteProps) {
     return <Navigate replace state={{ from: location }} to="/login" />;
   }
 
-  if (session.role !== role) {
+  const allowedRoles = role ? (Array.isArray(role) ? role : [role]) : undefined;
+  if (allowedRoles && !allowedRoles.includes(session.role)) {
     return (
       <Navigate
         replace

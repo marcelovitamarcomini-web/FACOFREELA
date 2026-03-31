@@ -1,11 +1,12 @@
 export const categories = [
-  'Design',
-  'Programação',
-  'Marketing Digital',
-  'Edição de Vídeo',
-  'Redação',
-  'Tradução',
-  'Consultoria',
+  'Conserto em Casa',
+  'Obra e Reforma',
+  'Frete e Guincho',
+  'Instalação e Manutenção',
+  'Design e Vídeo',
+  'Marketing e Redes',
+  'Sites e Tecnologia',
+  'Projetos e Consultoria',
 ] as const;
 
 export const experienceLevels = ['Júnior', 'Pleno', 'Sênior'] as const;
@@ -17,9 +18,32 @@ export type Category = (typeof categories)[number];
 export type ExperienceLevel = (typeof experienceLevels)[number];
 export type UserRole = (typeof userRoles)[number];
 export type SubscriptionStatus = (typeof subscriptionStatuses)[number];
-export type ContactChannel = 'Plataforma' | 'E-mail';
 export type FreelancerPlanTier = (typeof freelancerPlanTiers)[number];
-export const freelancerBoosterCnpjPrice = 5.99;
+export const digitalCategories = [
+  'Design e Vídeo',
+  'Marketing e Redes',
+  'Sites e Tecnologia',
+] as const satisfies readonly Category[];
+
+const digitalCategorySet = new Set<Category>(digitalCategories);
+
+export function isDigitalCategory(category?: string | null) {
+  return digitalCategorySet.has(category as Category);
+}
+
+export function shouldUseRegionalSearch(category?: string | null) {
+  if (!category || category === 'Todos') {
+    return true;
+  }
+
+  return !isDigitalCategory(category);
+}
+
+export const freelancerBoosterCnpjPrice = 6.99;
+export const platformContactChannel = 'Chat interno' as const;
+export type ContactChannel = typeof platformContactChannel;
+export const profileAssetKinds = ['avatar', 'banner'] as const;
+export type ProfileAssetKind = (typeof profileAssetKinds)[number];
 
 export const freelancerPlanCatalog: Record<
   FreelancerPlanTier,
@@ -32,7 +56,7 @@ export const freelancerPlanCatalog: Record<
 > = {
   normal: {
     name: 'Plano Freelancer Normal',
-    priceMonthly: 5.49,
+    priceMonthly: 6.5,
     summary: 'Entrada essencial para publicar o perfil e começar a receber contatos.',
     features: [
       'Perfil público listado na plataforma',
@@ -42,7 +66,7 @@ export const freelancerPlanCatalog: Record<
   },
   booster: {
     name: 'Plano Freelancer Booster',
-    priceMonthly: 7.99,
+    priceMonthly: 8.9,
     summary: 'Camada extra para quem quer operar com presença comercial reforçada.',
     features: [
       'Tudo do plano normal',
@@ -81,7 +105,6 @@ export interface Freelancer {
   location: string;
   experienceLevel: ExperienceLevel;
   yearsExperience: number;
-  averagePrice: number | null;
   skills: string[];
   portfolio: PortfolioItem[];
   avatarUrl: string;
@@ -134,6 +157,7 @@ export interface ClientProfile {
   name: string;
   email: string;
   phone: string;
+  avatarUrl?: string;
   location: string;
   createdAt: string;
 }
@@ -142,6 +166,15 @@ export interface SessionUser {
   id: string;
   name: string;
   role: UserRole;
+}
+
+export interface AuthSessionPayload {
+  user: SessionUser;
+}
+
+export interface RegistrationResponse {
+  user: SessionUser | null;
+  requiresEmailConfirmation: boolean;
 }
 
 export interface FreelancerDashboard {
@@ -167,7 +200,17 @@ export interface ClientDashboard {
   notifications: string[];
 }
 
+export interface ConversationInbox {
+  contacts: ContactMessage[];
+}
+
 export interface ApiEnvelope<T> {
   data: T;
   message?: string;
+}
+
+export interface ProfileAssetUploadResponse {
+  kind: ProfileAssetKind;
+  publicUrl: string;
+  persisted: boolean;
 }

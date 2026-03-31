@@ -11,7 +11,7 @@ export function FreelancerVerifiedSeal({
     return (
       <span
         aria-label={label}
-        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-cyan-300/40 bg-[linear-gradient(135deg,#67e8f9_0%,#06b6d4_55%,#2563eb_100%)] shadow-[0_8px_18px_rgba(14,116,144,0.24)]"
+        className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-[#0071e3]/25 bg-[linear-gradient(135deg,#69a8ff_0%,#0071e3_55%,#004aad_100%)] shadow-[0_8px_18px_rgba(0,113,227,0.18)]"
         title={label}
       >
         <span
@@ -26,10 +26,10 @@ export function FreelancerVerifiedSeal({
   return (
     <span
       aria-label={label}
-      className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/30 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-800"
+      className="inline-flex items-center gap-1.5 rounded-full border border-[#0071e3]/20 bg-[#0071e3]/8 px-2.5 py-1 text-[11px] font-semibold text-[#0059b3]"
       title={label}
     >
-      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[linear-gradient(135deg,#38bdf8_0%,#2563eb_100%)] shadow-[0_6px_14px_rgba(37,99,235,0.24)]">
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[linear-gradient(135deg,#56a0ff_0%,#0071e3_100%)] shadow-[0_6px_14px_rgba(0,113,227,0.18)]">
         <svg
           aria-hidden="true"
           className="h-2.5 w-2.5"

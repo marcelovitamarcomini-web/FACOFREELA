@@ -3,16 +3,18 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import {
   categories,
-  experienceLevels,
   freelancerPlanCatalog,
   getFreelancerPlanPrice,
   type FreelancerPlanTier,
 } from '../../shared/contracts';
 import { freelancerSignupSchema } from '../../shared/schemas';
 import { FormField } from '../components/FormField';
+import { InstitutionalSupportNote } from '../components/InstitutionalSupportNote';
 import { PhoneField } from '../components/PhoneField';
 import { useAppSession } from '../context/AppSessionContext';
+import { useCepLookup } from '../hooks/useCepLookup';
 import { api } from '../lib/api';
+import { BRAZIL_STATES, OTHER_BRAZIL_CITY_OPTION } from '../lib/brazil-states';
 import { currencyMonthly } from '../lib/format';
 import { composeBrazilPhone } from '../lib/phone';
 import { getFieldErrors } from '../lib/validation';
@@ -26,17 +28,10 @@ type FreelancerFormState = {
   phoneNumber: string;
   subscriptionTier: string;
   hasCnpj: string;
-  location: string;
   category: string;
   profession: string;
   summary: string;
   description: string;
-  experienceLevel: string;
-  yearsExperience: string;
-  averagePrice: string;
-  avatarUrl: string;
-  bannerUrl: string;
-  portfolioUrl: string;
   linkedinUrl: string;
   websiteUrl: string;
 };
@@ -50,17 +45,10 @@ const initialState: FreelancerFormState = {
   phoneNumber: '',
   subscriptionTier: 'normal',
   hasCnpj: '',
-  location: '',
   category: '',
   profession: '',
   summary: '',
   description: '',
-  experienceLevel: '',
-  yearsExperience: '',
-  averagePrice: '',
-  avatarUrl: '',
-  bannerUrl: '',
-  portfolioUrl: '',
   linkedinUrl: '',
   websiteUrl: '',
 };
@@ -69,6 +57,29 @@ const freelancerPlanEntries = Object.entries(freelancerPlanCatalog) as Array<
   [FreelancerPlanTier, (typeof freelancerPlanCatalog)[FreelancerPlanTier]]
 >;
 const cnpjOptions = ['Sim', 'Não'] as const;
+const compactCategoryKeys = new Set([
+  'conserto em casa',
+  'obra e reforma',
+  'frete e guincho',
+  'instalacao e manutencao',
+]);
+
+function buildFreelancerLocation(city: string, state: string) {
+  return [city.trim(), state.trim()].filter(Boolean).join(', ');
+}
+
+function normalizeCategoryKey(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function buildCompactFreelancerDescription(form: FreelancerFormState, city: string, state: string) {
+  const location = buildFreelancerLocation(city, state);
+  return `${form.profession.trim()} na categoria ${form.category.trim()} com base principal em ${location}. ${form.summary.trim()}`;
+}
 
 export function FreelancerSignupPage() {
   const navigate = useNavigate();
@@ -77,26 +88,110 @@ export function FreelancerSignupPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const {
+    value: cepLocation,
+    handleCepInput,
+    resolveCep,
+    validateResolvedLocation,
+    handleManualStateChange,
+    handleManualCitySelect,
+    handleCustomCityInput,
+    loading: cepLoading,
+    feedback: cepFeedback,
+    showManualLocationFields,
+    cityOptions,
+    cityOptionsLoading,
+    cityOptionsError,
+    useCustomCityInput,
+    manualCitySelectValue,
+  } = useCepLookup();
   const hasCnpj = form.hasCnpj === 'Sim';
   const boosterBonusPrice = getFreelancerPlanPrice('booster', true);
+  const usesCompactDescription = compactCategoryKeys.has(normalizeCategoryKey(form.category));
 
   function handleChange(
     event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
   ) {
     const { name, value } = event.target;
     setForm((current) => ({ ...current, [name]: value }));
+    setErrors((current) => {
+      const nextErrors = { ...current };
+      delete nextErrors[name];
+
+      if (name === 'category' && compactCategoryKeys.has(normalizeCategoryKey(value))) {
+        delete nextErrors.description;
+      }
+
+      return nextErrors;
+    });
+  }
+
+  function clearLocationErrors(fields: Array<'cep' | 'state' | 'city'> = ['cep', 'state', 'city']) {
+    setErrors((current) => {
+      if (!fields.some((field) => current[field])) {
+        return current;
+      }
+
+      const nextErrors = { ...current };
+      for (const field of fields) {
+        delete nextErrors[field];
+      }
+
+      return nextErrors;
+    });
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus(null);
 
+    const nextErrors: Record<string, string> = {};
+    const cepValidation = validateResolvedLocation();
+
+    if (cepLoading) {
+      nextErrors.cep = 'Aguarde a consulta do CEP terminar.';
+    } else if (showManualLocationFields && cityOptionsLoading) {
+      nextErrors.city = 'Aguarde a lista de cidades terminar de carregar.';
+    } else if (!cepValidation.ok) {
+      nextErrors[cepValidation.field] = cepValidation.message;
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
+
+    if (!cepValidation.ok) {
+      return;
+    }
+
     const parsed = freelancerSignupSchema.safeParse({
       ...form,
+      description: usesCompactDescription
+        ? buildCompactFreelancerDescription(
+            form,
+            cepValidation.value.city,
+            cepValidation.value.state,
+          )
+        : form.description,
+      experienceLevel: 'Pleno',
+      yearsExperience: 0,
+      cep: cepValidation.value.cep,
+      city: cepLocation.city,
+      state: cepLocation.state,
+      location: buildFreelancerLocation(cepValidation.value.city, cepValidation.value.state),
       phone: composeBrazilPhone(form.ddd, form.phoneNumber),
     });
+
     if (!parsed.success) {
-      setErrors(getFieldErrors(parsed.error));
+      const fieldErrors = getFieldErrors(parsed.error);
+
+      if (fieldErrors.location) {
+        fieldErrors.cep ??= fieldErrors.location;
+        delete fieldErrors.location;
+      }
+
+      setErrors(fieldErrors);
       return;
     }
 
@@ -104,40 +199,61 @@ export function FreelancerSignupPage() {
     setLoading(true);
 
     try {
-      const response = await api.registerFreelancer(parsed.data);
-      setSession(response.user);
-      navigate('/dashboard/freelancer');
+      const response = await api.registerFreelancer({
+        ...parsed.data,
+        cep: cepValidation.value.cep,
+      });
+
+      if (response.user) {
+        setSession(response.user);
+        navigate('/dashboard/freelancer');
+        return;
+      }
+
+      navigate('/login', {
+        state: {
+          email: parsed.data.email,
+          registrationMessage: response.requiresEmailConfirmation
+            ? 'Perfil criado com sucesso. Confirme seu e-mail e depois faça login.'
+            : 'Perfil criado com sucesso. Faça login para continuar.',
+        },
+      });
     } catch (submitError) {
-      setStatus(submitError instanceof Error ? submitError.message : 'Não foi possível concluir o cadastro.');
+      setStatus(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Não foi possível concluir o cadastro.',
+      );
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="container grid gap-10 py-14 lg:grid-cols-[0.85fr_1.15fr]">
+    <div className="container grid gap-10 py-16 lg:grid-cols-[0.88fr_1.12fr]">
       <section className="space-y-6">
-        <span className="inline-flex rounded-full border border-cyan-400/20 bg-cyan-500/10 px-4 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-700">
-          Perfil freelancer // Cadastro
+        <span className="inline-flex rounded-full border border-slate-200 bg-white/88 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+          Perfil freelancer
         </span>
-        <h1 className="text-4xl font-extrabold tracking-tight text-slate-950">
-          Publique seu perfil profissional e entre na camada de busca com painel próprio.
+        <h1 className="text-4xl font-semibold tracking-[-0.05em] text-slate-950 sm:text-5xl">
+          Monte seu perfil para ser encontrado por clientes que precisam do seu serviço.
         </h1>
-        <p className="text-base leading-7 text-slate-600">
-          O cadastro cria a conta, ativa a sessão e publica um perfil pronto para descoberta. Os contatos passam a entrar pelo backend protegido, sem depender de canal aberto no perfil público.
+        <p className="max-w-xl text-[1.02rem] leading-7 text-slate-500">
+          O Faço Freela foi pensado para quem trabalha na rua, na obra, em casa, no escritório, no
+          estúdio ou online. Você cria a conta, escolhe o plano e publica seu perfil no mesmo fluxo.
         </p>
 
-        <div className="space-y-4 rounded-[32px] border border-slate-800/50 bg-[linear-gradient(180deg,#020617_0%,#0f172a_100%)] p-7 text-white shadow-soft">
+        <div className="rounded-[34px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(246,249,255,0.96)_100%)] p-7 shadow-[0_20px_55px_rgba(15,23,42,0.05)]">
           <div>
-            <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-cyan-200">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0071e3]">
               Planos freelancer
             </p>
-            <h2 className="mt-3 text-2xl font-bold">
-              Escolha o ponto de entrada ideal para publicar seu perfil.
+            <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">
+              Escolha o ponto de entrada para publicar seu perfil.
             </h2>
           </div>
 
-          <div className="grid gap-4">
+          <div className="mt-5 grid gap-4">
             {freelancerPlanEntries.map(([tier, plan]) => {
               const displayPrice = getFreelancerPlanPrice(tier, hasCnpj);
               const hasCnpjBonus = hasCnpj && tier === 'booster';
@@ -145,29 +261,29 @@ export function FreelancerSignupPage() {
               return (
                 <div
                   key={tier}
-                  className={`rounded-[26px] border p-5 ${
+                  className={`rounded-[28px] border p-5 ${
                     tier === 'booster'
-                      ? 'border-cyan-300/30 bg-cyan-400/10'
-                      : 'border-white/10 bg-white/5'
+                      ? 'border-[#0071e3]/18 bg-[#0071e3]/[0.045]'
+                      : 'border-slate-200/80 bg-white/88'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <p className="text-sm font-semibold text-white">{plan.name}</p>
-                      <p className="mt-2 text-sm leading-6 text-slate-300">{plan.summary}</p>
+                      <p className="text-sm font-semibold text-slate-950">{plan.name}</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">{plan.summary}</p>
                     </div>
-                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-cyan-100">
+                    <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                       {tier === 'booster' ? 'Booster' : 'Normal'}
                     </span>
                   </div>
 
-                  <p className="mt-4 text-3xl font-extrabold">
+                  <p className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
                     {currencyMonthly(displayPrice)}
-                    <span className="text-base font-medium text-slate-300">/mês</span>
+                    <span className="text-base font-medium text-slate-500">/mês</span>
                   </p>
 
                   {tier === 'booster' ? (
-                    <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100">
+                    <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0071e3]">
                       {hasCnpjBonus
                         ? 'Bônus CNPJ aplicado'
                         : `Com CNPJ ativo: ${currencyMonthly(boosterBonusPrice)}/mês`}
@@ -180,15 +296,35 @@ export function FreelancerSignupPage() {
         </div>
       </section>
 
-      <section className="glass-panel tech-panel rounded-[32px] p-6 shadow-soft lg:p-8">
-        <form className="grid gap-5" onSubmit={handleSubmit}>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <FormField error={errors.name} label="Nome completo" name="name" onChange={handleChange} value={form.name} />
-            <FormField error={errors.email} label="E-mail" name="email" onChange={handleChange} type="email" value={form.email} />
+      <section className="glass-panel tech-panel rounded-[34px] p-6 lg:p-8">
+        <form className="grid gap-6" onSubmit={handleSubmit}>
+          <div className="grid gap-5 xl:grid-cols-2">
+            <FormField
+              error={errors.name}
+              label="Nome completo"
+              name="name"
+              onChange={handleChange}
+              value={form.name}
+            />
+            <FormField
+              error={errors.email}
+              label="E-mail"
+              name="email"
+              onChange={handleChange}
+              type="email"
+              value={form.email}
+            />
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-2">
-            <FormField error={errors.password} label="Senha" name="password" onChange={handleChange} type="password" value={form.password} />
+          <div className="grid gap-5 xl:grid-cols-2">
+            <FormField
+              error={errors.password}
+              label="Senha"
+              name="password"
+              onChange={handleChange}
+              type="password"
+              value={form.password}
+            />
             <FormField
               error={errors.confirmPassword}
               label="Confirmar senha"
@@ -199,12 +335,12 @@ export function FreelancerSignupPage() {
             />
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-2">
+          <div className="grid gap-5 xl:grid-cols-[minmax(17rem,0.82fr)_minmax(0,1.18fr)] xl:items-start">
             <PhoneField
               dddValue={form.ddd}
               error={errors.phone}
-              hint="Telefone protegido para segurança da conta e continuidade do atendimento."
-              label="Telefone de segurança"
+              hint="Usamos esse número só para segurança da conta. O +55 entra automaticamente no sistema."
+              label="Celular"
               numberValue={form.phoneNumber}
               onDddChange={(value) => setForm((current) => ({ ...current, ddd: value }))}
               onNumberChange={(value) =>
@@ -214,14 +350,171 @@ export function FreelancerSignupPage() {
                 }))
               }
             />
-            <FormField error={errors.location} label="Localização" name="location" onChange={handleChange} value={form.location} />
+
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                Base de atendimento
+              </div>
+
+              <div className="rounded-[28px] border border-slate-200/80 bg-white/92 p-2.5 shadow-[0_10px_24px_rgba(15,23,42,0.04)]">
+                <div className="grid gap-2.5 lg:grid-cols-[156px_minmax(0,1fr)] lg:items-stretch">
+                  <label className="flex min-h-[78px] flex-col justify-center rounded-[22px] border border-slate-200/80 bg-white px-4 py-3">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                      CEP
+                    </span>
+                    <input
+                      className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+                      inputMode="numeric"
+                      maxLength={9}
+                      onBlur={() => void resolveCep()}
+                      onChange={(event) => {
+                        handleCepInput(event.target.value);
+                        clearLocationErrors();
+
+                        if (event.target.value.replace(/\D/g, '').length === 8) {
+                          void resolveCep(event.target.value);
+                        }
+                      }}
+                      placeholder="00000-000"
+                      type="text"
+                      value={cepLocation.cep}
+                    />
+                  </label>
+
+                  <div className="grid gap-3">
+                    <div className="grid gap-2.5 sm:grid-cols-2">
+                      {showManualLocationFields ? (
+                        <label className="flex min-h-[78px] flex-col justify-center rounded-[22px] border border-slate-200/80 bg-white px-4 py-3">
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                            Estado
+                          </span>
+                          <select
+                            className="mt-1 w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                            onChange={(event) => {
+                              clearLocationErrors(['state', 'city']);
+                              void handleManualStateChange(event.target.value);
+                            }}
+                            value={cepLocation.state}
+                          >
+                            <option value="">Selecione</option>
+                            {BRAZIL_STATES.map((stateOption) => (
+                              <option key={stateOption.code} value={stateOption.code}>
+                                {stateOption.code} - {stateOption.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <div className="flex min-h-[78px] flex-col justify-center rounded-[22px] border border-slate-200/80 bg-slate-50/90 px-4 py-3">
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                            Estado
+                          </span>
+                          <p
+                            className={`mt-1 min-h-[20px] break-words text-sm font-semibold leading-5 ${
+                              cepLocation.state ? 'text-slate-900' : 'text-slate-500'
+                            }`}
+                          >
+                            {cepLocation.state || 'Via CEP'}
+                          </p>
+                        </div>
+                      )}
+
+                      {showManualLocationFields ? (
+                        <label className="flex min-h-[78px] flex-col justify-center rounded-[22px] border border-slate-200/80 bg-white px-4 py-3">
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                            Cidade
+                          </span>
+                          <select
+                            className="mt-1 w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none disabled:cursor-not-allowed disabled:text-slate-400"
+                            disabled={!cepLocation.state || cityOptionsLoading}
+                            onChange={(event) => {
+                              clearLocationErrors(['city']);
+                              handleManualCitySelect(event.target.value);
+                            }}
+                            value={manualCitySelectValue}
+                          >
+                            <option value="">
+                              {!cepLocation.state
+                                ? 'Escolha o estado primeiro'
+                                : cityOptionsLoading
+                                  ? 'Carregando cidades...'
+                                  : 'Selecione'}
+                            </option>
+                            {cityOptions.map((cityOption) => (
+                              <option key={cityOption} value={cityOption}>
+                                {cityOption}
+                              </option>
+                            ))}
+                            <option value={OTHER_BRAZIL_CITY_OPTION}>Outro</option>
+                          </select>
+                        </label>
+                      ) : (
+                        <div className="flex min-h-[78px] flex-col justify-center rounded-[22px] border border-slate-200/80 bg-slate-50/90 px-4 py-3">
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                            Cidade
+                          </span>
+                          <p
+                            className={`mt-1 min-h-[20px] break-words text-sm font-semibold leading-5 ${
+                              cepLocation.city ? 'text-slate-900' : 'text-slate-500'
+                            }`}
+                          >
+                            {cepLocation.city || 'Via CEP'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {showManualLocationFields && useCustomCityInput ? (
+                      <label className="flex min-h-[78px] flex-col justify-center rounded-[22px] border border-slate-200/80 bg-white px-4 py-3">
+                        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+                          Digite a cidade
+                        </span>
+                        <input
+                          className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+                          onChange={(event) => {
+                            clearLocationErrors(['city']);
+                            handleCustomCityInput(event.target.value);
+                          }}
+                          placeholder="Ex: Campinas"
+                          value={cepLocation.city}
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs leading-5 text-slate-500">
+                Informe o CEP principal de atendimento. Se ele não retornar, você pode concluir por
+                Estado e Cidade para manter o perfil consistente.
+              </p>
+
+              {cepFeedback ? (
+                <p
+                  className={`text-sm ${
+                    cepFeedback.tone === 'error'
+                      ? 'text-rose-600'
+                      : cepFeedback.tone === 'success'
+                        ? 'text-emerald-700'
+                        : 'text-slate-500'
+                  }`}
+                >
+                  {cepFeedback.text}
+                </p>
+              ) : null}
+
+              {cityOptionsError ? <p className="text-sm text-amber-700">{cityOptionsError}</p> : null}
+              {errors.cep ? <p className="text-sm text-rose-600">{errors.cep}</p> : null}
+              {errors.state ? <p className="text-sm text-rose-600">{errors.state}</p> : null}
+              {errors.city ? <p className="text-sm text-rose-600">{errors.city}</p> : null}
+            </div>
           </div>
 
           <div className="space-y-3">
             <div>
-              <p className="text-sm font-semibold text-slate-700">Conta profissional</p>
+              <p className="text-sm font-semibold text-slate-700">Atende com CNPJ?</p>
               <p className="mt-1 text-sm leading-6 text-slate-500">
-                Informe se este perfil atende com CNPJ ativo.
+                Marque essa opção se o perfil vai atender com CNPJ ativo.
               </p>
             </div>
 
@@ -234,8 +527,8 @@ export function FreelancerSignupPage() {
                     key={option}
                     className={`rounded-[24px] border px-4 py-4 text-left transition ${
                       isSelected
-                        ? 'border-cyan-400 bg-cyan-500/8 shadow-soft'
-                        : 'border-slate-200/90 bg-white/80 hover:border-cyan-300'
+                        ? 'border-[#0071e3]/30 bg-[#0071e3]/[0.06] shadow-[0_14px_36px_rgba(0,113,227,0.08)]'
+                        : 'border-slate-200/90 bg-white/80 hover:border-slate-300'
                     }`}
                     onClick={() =>
                       setForm((current) => ({
@@ -259,7 +552,7 @@ export function FreelancerSignupPage() {
             {errors.hasCnpj ? <p className="text-sm text-rose-600">{errors.hasCnpj}</p> : null}
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-2">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,0.94fr)_minmax(0,1.06fr)]">
             <FormField
               error={errors.category}
               label="Categoria principal"
@@ -273,57 +566,87 @@ export function FreelancerSignupPage() {
               label="Profissão"
               name="profession"
               onChange={handleChange}
-              placeholder="Ex: UX Designer"
+              placeholder="Ex: Chaveiro 24h, Pedreiro, Designer ou Arquiteto"
               value={form.profession}
             />
           </div>
 
-          <FormField
-            error={errors.summary}
-            label="Resumo profissional"
-            name="summary"
-            onChange={handleChange}
-            placeholder="Apresente seu diferencial em uma frase curta."
-            value={form.summary}
-          />
+          <div className="space-y-5">
+            <div>
+              <p className="text-sm font-semibold text-slate-700">Apresentação profissional</p>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Nesta etapa, vale priorizar o essencial: serviço, área de atendimento e tipo de
+                demanda que você assume.
+              </p>
+            </div>
 
-          <FormField
-            error={errors.description}
-            label="Descrição profissional"
-            name="description"
-            onChange={handleChange}
-            placeholder="Explique serviços, experiência e tipo de projeto que você atende."
-            textarea
-            value={form.description}
-          />
+            <FormField
+              error={errors.summary}
+              label="Resumo profissional"
+              name="summary"
+              onChange={handleChange}
+              placeholder="Explique em uma frase o que você faz e onde pode atender."
+              value={form.summary}
+            />
 
-          <div className="grid gap-5 sm:grid-cols-3">
-            <FormField
-              error={errors.experienceLevel}
-              label="Nível de experiência"
-              name="experienceLevel"
-              onChange={handleChange}
-              options={[...experienceLevels]}
-              value={form.experienceLevel}
-            />
-            <FormField error={errors.yearsExperience} label="Anos de experiência" min="0" name="yearsExperience" onChange={handleChange} type="number" value={form.yearsExperience} />
-            <FormField
-              error={errors.averagePrice}
-              label="Preço médio"
-              min="1"
-              name="averagePrice"
-              onChange={handleChange}
-              placeholder="Ex: 1500"
-              type="number"
-              value={form.averagePrice}
-            />
+            {usesCompactDescription ? (
+              <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/90 px-4 py-4 text-sm leading-6 text-slate-600">
+                Para essa categoria, o cadastro segue mais direto: a descrição profissional fica
+                opcional nesta etapa.
+              </div>
+            ) : (
+              <FormField
+                error={errors.description}
+                label="Descrição profissional"
+                name="description"
+                onChange={handleChange}
+                placeholder="Descreva seus serviços, a região em que atende e o tipo de demanda que você assume."
+                textarea
+                value={form.description}
+              />
+            )}
+          </div>
+
+          <div className="space-y-5">
+            <div>
+              <p className="text-sm font-semibold text-slate-700">Links profissionais</p>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Se quiser, adicione apenas os canais que ajudam a validar sua presença profissional.
+              </p>
+            </div>
+
+            <div className="grid gap-5 xl:grid-cols-2">
+              <FormField
+                error={errors.linkedinUrl}
+                label="LinkedIn"
+                name="linkedinUrl"
+                onChange={handleChange}
+                optional
+                placeholder="https://"
+                value={form.linkedinUrl}
+              />
+              <FormField
+                error={errors.websiteUrl}
+                label="Site pessoal"
+                name="websiteUrl"
+                onChange={handleChange}
+                optional
+                placeholder="https://"
+                value={form.websiteUrl}
+              />
+            </div>
+
+            <div className="rounded-[24px] border border-slate-200/80 bg-slate-50/90 px-4 py-4 text-sm leading-6 text-slate-600">
+              Foto profissional, capa do perfil e portfólio podem ser configurados depois, já com a
+              conta criada.
+            </div>
           </div>
 
           <div className="space-y-3">
             <div>
               <p className="text-sm font-semibold text-slate-700">Selecione seu plano</p>
               <p className="mt-1 text-sm leading-6 text-slate-500">
-                O plano define sua assinatura mensal logo na ativação do perfil.
+                O plano define a assinatura mensal logo na ativação do perfil.
               </p>
             </div>
 
@@ -338,8 +661,8 @@ export function FreelancerSignupPage() {
                     key={tier}
                     className={`rounded-[28px] border p-5 text-left transition ${
                       isSelected
-                        ? 'border-cyan-400 bg-cyan-500/8 shadow-soft'
-                        : 'border-slate-200/90 bg-white/80 hover:border-cyan-300'
+                        ? 'border-[#0071e3]/30 bg-[#0071e3]/[0.06] shadow-[0_14px_36px_rgba(0,113,227,0.08)]'
+                        : 'border-slate-200/90 bg-white/80 hover:border-slate-300'
                     }`}
                     onClick={() =>
                       setForm((current) => ({
@@ -351,27 +674,27 @@ export function FreelancerSignupPage() {
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <p className="text-base font-bold text-slate-950">{plan.name}</p>
+                        <p className="text-base font-semibold text-slate-950">{plan.name}</p>
                         <p className="mt-2 text-sm leading-6 text-slate-600">{plan.summary}</p>
                       </div>
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                        className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${
                           isSelected
-                            ? 'bg-slate-950 text-white'
-                            : 'border border-slate-200 bg-white text-slate-600'
+                            ? 'bg-[#0071e3] text-white'
+                            : 'border border-slate-200 bg-white text-slate-500'
                         }`}
                       >
                         {isSelected ? 'Selecionado' : tier === 'booster' ? 'Booster' : 'Normal'}
                       </span>
                     </div>
 
-                    <p className="mt-4 text-3xl font-extrabold text-slate-950">
+                    <p className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-slate-950">
                       {currencyMonthly(displayPrice)}
                       <span className="text-sm font-medium text-slate-500">/mês</span>
                     </p>
 
                     {tier === 'booster' ? (
-                      <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">
+                      <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0071e3]">
                         {hasCnpjBonus
                           ? 'Bônus CNPJ aplicado'
                           : `Com CNPJ ativo: ${currencyMonthly(boosterBonusPrice)}/mês`}
@@ -395,57 +718,6 @@ export function FreelancerSignupPage() {
             ) : null}
           </div>
 
-          <div className="grid gap-5 sm:grid-cols-3">
-            <FormField
-              error={errors.avatarUrl}
-              label="Foto profissional"
-              name="avatarUrl"
-              onChange={handleChange}
-              optional
-              placeholder="https://"
-              value={form.avatarUrl}
-            />
-            <FormField
-              error={errors.bannerUrl}
-              label="Banner do perfil"
-              name="bannerUrl"
-              onChange={handleChange}
-              optional
-              placeholder="https://"
-              value={form.bannerUrl}
-            />
-            <FormField
-              error={errors.portfolioUrl}
-              label="Portfólio"
-              name="portfolioUrl"
-              onChange={handleChange}
-              optional
-              placeholder="https://"
-              value={form.portfolioUrl}
-            />
-          </div>
-
-          <div className="grid gap-5 sm:grid-cols-3">
-            <FormField
-              error={errors.linkedinUrl}
-              label="LinkedIn"
-              name="linkedinUrl"
-              onChange={handleChange}
-              optional
-              placeholder="https://"
-              value={form.linkedinUrl}
-            />
-            <FormField
-              error={errors.websiteUrl}
-              label="Site pessoal"
-              name="websiteUrl"
-              onChange={handleChange}
-              optional
-              placeholder="https://"
-              value={form.websiteUrl}
-            />
-          </div>
-
           {status ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {status}
@@ -453,8 +725,8 @@ export function FreelancerSignupPage() {
           ) : null}
 
           <button
-            className="rounded-full bg-slate-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-            disabled={loading}
+            className="w-full rounded-full bg-[#0071e3] px-6 py-3 text-sm font-semibold text-white transition hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:bg-slate-300"
+            disabled={loading || cepLoading || (showManualLocationFields && cityOptionsLoading)}
             type="submit"
           >
             {loading ? 'Criando perfil...' : 'Criar perfil e ativar plano'}
@@ -463,14 +735,13 @@ export function FreelancerSignupPage() {
 
         <p className="mt-6 text-sm text-slate-500">
           Já possui conta?{' '}
-          <Link className="font-semibold text-cyan-700" to="/login">
+          <Link className="font-semibold text-[#0071e3]" to="/login">
             Fazer login
           </Link>
         </p>
+
+        <InstitutionalSupportNote className="mt-4" compact />
       </section>
     </div>
   );
 }
-
-
-

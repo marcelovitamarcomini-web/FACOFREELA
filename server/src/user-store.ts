@@ -1,6 +1,7 @@
 import type {
   ClientDashboard,
   ClientProfile,
+  ConversationInbox,
   Freelancer,
   FreelancerDashboard,
   PortfolioItem,
@@ -15,25 +16,15 @@ import {
 } from '../../shared/contracts.js';
 import type { StoredClient, StoredFreelancer } from './data.js';
 import {
-  addClient as addLocalClientShadow,
-  addFreelancer as addLocalFreelancerShadow,
-  deleteSessionsByUserId,
-  ensureUniqueFreelancerSlug as ensureLegacyFreelancerSlug,
   findClientRecordByEmail as findLegacyClientRecordByEmail,
   findClientRecordById as findLegacyClientRecordById,
   findFreelancerRecordByEmail as findLegacyFreelancerRecordByEmail,
   findFreelancerRecordById as findLegacyFreelancerRecordById,
-  findSessionUserByEmail as findLegacySessionUserByEmail,
-  getNextClientId as getLegacyNextClientId,
-  getNextFreelancerId as getLegacyNextFreelancerId,
   listContactsByClientIdentity,
   listContactsByFreelancerIdentity,
-  listPublicFreelancers as listLegacyPublicFreelancers,
   recordFreelancerProfileViewByIdentity,
-  removeClientShadow as removeLocalClientShadow,
-  removeFreelancerShadow as removeLocalFreelancerShadow,
 } from './data.js';
-import { createSupabaseUserClient, getSupabaseClient } from './supabase.js';
+import { createSupabaseUserClient, getSupabaseServerReadClient } from './supabase.js';
 
 type SupabaseProfileRow = {
   id: string;
@@ -52,6 +43,7 @@ type SupabaseProfileRow = {
 type SupabaseClientProfileRow = {
   id: string;
   user_id: string;
+  cep: string | null;
   company_name: string | null;
   document_number: string | null;
   contact_name: string | null;
@@ -70,6 +62,7 @@ type SupabaseFreelancerProfileRow = {
   skills: string[] | null;
   experience_level: DatabaseExperienceLevel | null;
   portfolio_url: string | null;
+  banner_url: string | null;
   hourly_rate: number | null;
   availability_status: DatabaseAvailabilityStatus | null;
   rating_average: number | null;
@@ -81,8 +74,7 @@ type SupabaseFreelancerProfileRow = {
 type UserLookup = {
   user: SessionUser;
   email: string;
-  source: 'supabase' | 'legacy';
-  passwordHash?: string;
+  source: 'supabase';
 };
 
 type SupabaseUserBundle =
@@ -93,26 +85,35 @@ type SupabaseUserBundle =
     }
   | null;
 
-const supabase = getSupabaseClient();
+const supabase = getSupabaseServerReadClient();
 const defaultFreelancerAvatar =
   'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=400&q=80';
-const defaultFreelancerBanner =
-  'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1400&q=80';
-const supabaseManagedUserIdPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const defaultFreelancerBanner = '/banner_geral.png';
+const legacyFreelancerBannerUrls = new Set([
+  'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1400&q=80',
+  '/banner_geral.png',
+]);
+
+function getSupabaseQueryClient(accessToken?: string) {
+  if (accessToken) {
+    return createSupabaseUserClient(accessToken) ?? supabase;
+  }
+
+  return supabase;
+}
 
 // Block 1 canonical source of truth for user identity:
 // - public.profiles
 // - public.client_profiles
 // - public.freelancer_profiles
 //
-// Any local data touched below is compatibility residue only. It remains for:
-// - accounts blocked by email confirmation from getting an authenticated access token at sign-up
-// - freelancer operational/showcase fields that do not belong to the Block 1 schema
+// Any local data touched below is residue only. It is never used for cadastro or autenticação.
+// It remains temporarily only for freelancer operational/showcase fields that do not belong
+// to the current Block 1 schema.
 
 type FreelancerOperationalResidue = Pick<
   StoredFreelancer,
-  'email' | 'hasCnpj' | 'passwordHash' | 'phone' | 'subscription' | 'metrics'
+  'email' | 'hasCnpj' | 'phone' | 'subscription' | 'metrics'
 >;
 
 type FreelancerPresentationResidue = Pick<
@@ -135,8 +136,22 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-export function isSupabaseManagedUserId(id: string): boolean {
-  return supabaseManagedUserIdPattern.test(id);
+function normalizeOptionalText(value?: string | null): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized ? normalized : undefined;
+}
+
+function normalizeFreelancerBannerUrl(value?: string | null): string | undefined {
+  const normalized = normalizeOptionalText(value);
+  if (!normalized || legacyFreelancerBannerUrls.has(normalized)) {
+    return undefined;
+  }
+
+  return normalized;
 }
 
 function buildLocation(city?: string | null, state?: string | null): string {
@@ -150,18 +165,6 @@ function fallbackName(profile: SupabaseProfileRow): string {
 function getExplicitUserRole(profile: SupabaseProfileRow): UserRole | undefined {
   if (profile.user_type === 'client' || profile.user_type === 'freelancer') {
     return profile.user_type;
-  }
-
-  return undefined;
-}
-
-function inferLegacyUserRoleByEmail(email: string): UserRole | undefined {
-  if (findLegacyClientRecordByEmail(email)) {
-    return 'client';
-  }
-
-  if (findLegacyFreelancerRecordByEmail(email)) {
-    return 'freelancer';
   }
 
   return undefined;
@@ -184,7 +187,7 @@ function inferUserRoleFromBundle(
     return 'freelancer';
   }
 
-  return fallbackRole ?? inferLegacyUserRoleByEmail(bundle.profile.email);
+  return fallbackRole;
 }
 
 function buildSessionUser(
@@ -313,37 +316,167 @@ function inferCategory(
   skills: string[],
   legacyCategory?: Freelancer['category'],
 ): Freelancer['category'] {
-  if (legacyCategory) {
-    return legacyCategory;
+  const normalizedLegacyCategory = normalizeLegacyCategory(legacyCategory);
+  if (normalizedLegacyCategory) {
+    return normalizedLegacyCategory;
   }
 
   const haystack = `${profession} ${skills.join(' ')}`.toLowerCase();
-  if (haystack.includes('design') || haystack.includes('ux') || haystack.includes('ui')) {
-    return 'Design';
+
+  if (
+    haystack.includes('chaveiro') ||
+    haystack.includes('encan') ||
+    haystack.includes('eletric') ||
+    haystack.includes('montador') ||
+    haystack.includes('marcene') ||
+    haystack.includes('jardin') ||
+    haystack.includes('limpeza') ||
+    haystack.includes('manuten')
+  ) {
+    return 'Conserto em Casa';
+  }
+
+  if (
+    haystack.includes('pedreiro') ||
+    haystack.includes('obra') ||
+    haystack.includes('reforma') ||
+    haystack.includes('pintor') ||
+    haystack.includes('gesso') ||
+    haystack.includes('constru') ||
+    haystack.includes('arquit') ||
+    haystack.includes('engenh')
+  ) {
+    return 'Obra e Reforma';
+  }
+
+  if (
+    haystack.includes('guincho') ||
+    haystack.includes('frete') ||
+    haystack.includes('mudan') ||
+    haystack.includes('entrega') ||
+    haystack.includes('motorista') ||
+    haystack.includes('transporte') ||
+    haystack.includes('reboque')
+  ) {
+    return 'Frete e Guincho';
+  }
+
+  if (
+    haystack.includes('técnic') ||
+    haystack.includes('tecnic') ||
+    haystack.includes('instala') ||
+    haystack.includes('vistoria') ||
+    haystack.includes('refrigera') ||
+    haystack.includes('ar-condicionado') ||
+    haystack.includes('solda')
+  ) {
+    return 'Instalação e Manutenção';
+  }
+
+  if (
+    haystack.includes('design') ||
+    haystack.includes('ux') ||
+    haystack.includes('ui') ||
+    haystack.includes('vídeo') ||
+    haystack.includes('video') ||
+    haystack.includes('motion') ||
+    haystack.includes('foto') ||
+    haystack.includes('social')
+  ) {
+    return 'Design e Vídeo';
+  }
+
+  if (
+    haystack.includes('marketing') ||
+    haystack.includes('ads') ||
+    haystack.includes('copy') ||
+    haystack.includes('seo') ||
+    haystack.includes('reda') ||
+    haystack.includes('conteúdo') ||
+    haystack.includes('trad') ||
+    haystack.includes('vendas')
+  ) {
+    return 'Marketing e Redes';
   }
 
   if (
     haystack.includes('react') ||
     haystack.includes('node') ||
     haystack.includes('dev') ||
-    haystack.includes('program')
+    haystack.includes('program') ||
+    haystack.includes('site') ||
+    haystack.includes('app') ||
+    haystack.includes('software') ||
+    haystack.includes('sistema') ||
+    haystack.includes('automa')
   ) {
-    return 'Programação';
+    return 'Sites e Tecnologia';
   }
 
-  if (haystack.includes('marketing') || haystack.includes('ads') || haystack.includes('copy')) {
-    return 'Marketing Digital';
-  }
-
-  if (haystack.includes('vídeo') || haystack.includes('video') || haystack.includes('motion')) {
-    return 'Edição de Vídeo';
-  }
-
-  if (haystack.includes('seo') || haystack.includes('reda') || haystack.includes('conteúdo')) {
-    return 'Redação';
+  if (
+    haystack.includes('consult') ||
+    haystack.includes('mentoria') ||
+    haystack.includes('aula') ||
+    haystack.includes('planeja') ||
+    haystack.includes('financeir') ||
+    haystack.includes('contáb') ||
+    haystack.includes('contab') ||
+    haystack.includes('juríd') ||
+    haystack.includes('jurid')
+  ) {
+    return 'Projetos e Consultoria';
   }
 
   return categories[0];
+}
+
+function normalizeLegacyCategory(
+  legacyCategory?: string,
+): Freelancer['category'] | undefined {
+  if (!legacyCategory) {
+    return undefined;
+  }
+
+  switch (legacyCategory) {
+    case 'Conserto em Casa':
+    case 'Obra e Reforma':
+    case 'Frete e Guincho':
+    case 'Instalação e Manutenção':
+    case 'Design e Vídeo':
+    case 'Marketing e Redes':
+    case 'Sites e Tecnologia':
+    case 'Projetos e Consultoria':
+      return legacyCategory;
+    case 'Casa e Reparos':
+      return 'Conserto em Casa';
+    case 'Obras e Reformas':
+      return 'Obra e Reforma';
+    case 'Transporte e Assistência':
+      return 'Frete e Guincho';
+    case 'Serviços Técnicos':
+      return 'Instalação e Manutenção';
+    case 'Design e Audiovisual':
+      return 'Design e Vídeo';
+    case 'Marketing e Conteúdo':
+      return 'Marketing e Redes';
+    case 'Tecnologia e Sites':
+      return 'Sites e Tecnologia';
+    case 'Consultoria e Projetos':
+      return 'Projetos e Consultoria';
+    case 'Design':
+    case 'Edição de Vídeo':
+      return 'Design e Vídeo';
+    case 'Programação':
+      return 'Sites e Tecnologia';
+    case 'Marketing Digital':
+    case 'Redação':
+    case 'Tradução':
+      return 'Marketing e Redes';
+    case 'Consultoria':
+      return 'Projetos e Consultoria';
+    default:
+      return undefined;
+  }
 }
 
 function createDefaultSubscription(hasCnpj: boolean, tier: 'normal' | 'booster' = 'normal'): SubscriptionPlan {
@@ -357,12 +490,16 @@ function createDefaultSubscription(hasCnpj: boolean, tier: 'normal' | 'booster' 
   };
 }
 
-async function selectProfileByEmail(email: string): Promise<SupabaseProfileRow | null> {
-  if (!supabase) {
+async function selectProfileByEmail(
+  email: string,
+  accessToken?: string,
+): Promise<SupabaseProfileRow | null> {
+  const client = getSupabaseQueryClient(accessToken);
+  if (!client) {
     return null;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from('profiles')
     .select('id,full_name,email,phone,user_type,avatar_url,bio,city,state,created_at,updated_at')
     .eq('email', normalizeEmail(email))
@@ -375,12 +512,13 @@ async function selectProfileByEmail(email: string): Promise<SupabaseProfileRow |
   return data;
 }
 
-async function selectProfileById(id: string): Promise<SupabaseProfileRow | null> {
-  if (!supabase) {
+async function selectProfileById(id: string, accessToken?: string): Promise<SupabaseProfileRow | null> {
+  const client = getSupabaseQueryClient(accessToken);
+  if (!client) {
     return null;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from('profiles')
     .select('id,full_name,email,phone,user_type,avatar_url,bio,city,state,created_at,updated_at')
     .eq('id', id)
@@ -393,15 +531,19 @@ async function selectProfileById(id: string): Promise<SupabaseProfileRow | null>
   return data;
 }
 
-async function selectClientProfileByUserId(userId: string): Promise<SupabaseClientProfileRow | null> {
-  if (!supabase) {
+async function selectClientProfileByUserId(
+  userId: string,
+  accessToken?: string,
+): Promise<SupabaseClientProfileRow | null> {
+  const client = getSupabaseQueryClient(accessToken);
+  if (!client) {
     return null;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from('client_profiles')
     .select(
-      'id,user_id,company_name,document_number,contact_name,company_description,created_at,updated_at',
+      'id,user_id,cep,company_name,document_number,contact_name,company_description,created_at,updated_at',
     )
     .eq('user_id', userId)
     .maybeSingle();
@@ -415,15 +557,17 @@ async function selectClientProfileByUserId(userId: string): Promise<SupabaseClie
 
 async function selectFreelancerProfileByUserId(
   userId: string,
+  accessToken?: string,
 ): Promise<SupabaseFreelancerProfileRow | null> {
-  if (!supabase) {
+  const client = getSupabaseQueryClient(accessToken);
+  if (!client) {
     return null;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await client
     .from('freelancer_profiles')
     .select(
-      'id,user_id,professional_title,skills,experience_level,portfolio_url,hourly_rate,availability_status,rating_average,total_reviews,created_at,updated_at',
+      'id,user_id,professional_title,skills,experience_level,portfolio_url,banner_url,hourly_rate,availability_status,rating_average,total_reviews,created_at,updated_at',
     )
     .eq('user_id', userId)
     .maybeSingle();
@@ -463,7 +607,7 @@ async function selectFreelancerProfilesByUserIds(
   const { data, error } = await supabase
     .from('freelancer_profiles')
     .select(
-      'id,user_id,professional_title,skills,experience_level,portfolio_url,hourly_rate,availability_status,rating_average,total_reviews,created_at,updated_at',
+      'id,user_id,professional_title,skills,experience_level,portfolio_url,banner_url,hourly_rate,availability_status,rating_average,total_reviews,created_at,updated_at',
     )
     .in('user_id', userIds);
 
@@ -474,33 +618,29 @@ async function selectFreelancerProfilesByUserIds(
   return new Map(data.map((item) => [item.user_id, item]));
 }
 
-async function loadSupabaseUserBundle(id: string): Promise<SupabaseUserBundle> {
-  const profile = await selectProfileById(id);
+async function loadSupabaseUserBundle(id: string, accessToken?: string): Promise<SupabaseUserBundle> {
+  const profile = await selectProfileById(id, accessToken);
   if (!profile) {
     return null;
   }
 
   return {
     profile,
-    clientProfile: await selectClientProfileByUserId(profile.id),
-    freelancerProfile: await selectFreelancerProfileByUserId(profile.id),
+    clientProfile: await selectClientProfileByUserId(profile.id, accessToken),
+    freelancerProfile: await selectFreelancerProfileByUserId(profile.id, accessToken),
   };
 }
 
-async function loadSupabaseUserBundleByEmail(email: string): Promise<SupabaseUserBundle> {
-  const profile = await selectProfileByEmail(email);
+async function loadSupabaseUserBundleByEmail(
+  email: string,
+  accessToken?: string,
+): Promise<SupabaseUserBundle> {
+  const profile = await selectProfileByEmail(email, accessToken);
   if (!profile) {
     return null;
   }
 
-  return loadSupabaseUserBundle(profile.id);
-}
-
-function findClientCompatibilityShadow(idOrEmail: string): StoredClient | undefined {
-  return (
-    findLegacyClientRecordById(idOrEmail) ??
-    findLegacyClientRecordByEmail(idOrEmail)
-  );
+  return loadSupabaseUserBundle(profile.id, accessToken);
 }
 
 function findFreelancerLocalShadow(idOrEmail: string): StoredFreelancer | undefined {
@@ -522,6 +662,7 @@ function mergeClientFromSupabase(
       name: fallbackName(bundle.profile),
       email: bundle.profile.email,
       phone: bundle.profile.phone ?? legacy?.profile.phone ?? '',
+      avatarUrl: bundle.profile.avatar_url ?? undefined,
       location,
       createdAt:
         bundle.clientProfile?.created_at ??
@@ -529,7 +670,6 @@ function mergeClientFromSupabase(
         legacy?.profile.createdAt ??
         new Date().toISOString(),
     },
-    passwordHash: legacy?.passwordHash ?? '',
   };
 }
 
@@ -567,7 +707,10 @@ function buildFreelancerPresentationResidue(
     availability:
       legacy?.profile.availability ?? availabilityTextFromStatus(freelancerProfile?.availability_status),
     memberSince: legacy?.profile.memberSince ?? bundle.profile.created_at,
-    bannerUrl: legacy?.profile.bannerUrl ?? defaultFreelancerBanner,
+    bannerUrl:
+      normalizeFreelancerBannerUrl(freelancerProfile?.banner_url) ??
+      normalizeFreelancerBannerUrl(legacy?.profile.bannerUrl) ??
+      defaultFreelancerBanner,
   };
 }
 
@@ -578,10 +721,6 @@ function buildFreelancerOperationalResidue(
   return {
     email: bundle.profile.email,
     hasCnpj: legacy?.hasCnpj ?? false,
-    // Compatibility-only password fallback:
-    // active while a local/demo account still exists without a confirmed Supabase session.
-    // This should disappear when local user shadows are retired after the migration window.
-    passwordHash: legacy?.passwordHash ?? '',
     phone: bundle.profile.phone ?? legacy?.phone ?? '',
     // Operational residue outside Block 1 schema.
     // Subscription and metrics must move only in a later operational persistence block.
@@ -617,10 +756,6 @@ function mergeFreelancerFromSupabase(
     location,
     experienceLevel,
     yearsExperience: presentation.yearsExperience,
-    averagePrice:
-      typeof freelancerProfile?.hourly_rate === 'number'
-        ? freelancerProfile.hourly_rate
-        : legacy?.profile.averagePrice ?? null,
     skills,
     portfolio: presentation.portfolio,
     avatarUrl: bundle.profile.avatar_url ?? legacy?.profile.avatarUrl ?? defaultFreelancerAvatar,
@@ -654,13 +789,14 @@ export async function createSupabaseUserProfiles(input: {
     professionalTitle?: string;
     experienceLevel?: Freelancer['experienceLevel'];
     skills?: string[];
-    hourlyRate?: number | null;
     portfolioUrl?: string;
+    bannerUrl?: string;
     availabilityStatus?: string;
     ratingAverage?: number | null;
     totalReviews?: number | null;
   };
   client?: {
+    cep?: string;
     companyName?: string;
     documentNumber?: string;
     contactName?: string;
@@ -672,18 +808,40 @@ export async function createSupabaseUserProfiles(input: {
     return false;
   }
 
+  const profilePayload: Record<string, unknown> = {
+    id: input.id,
+    full_name: input.fullName,
+    email: normalizeEmail(input.email),
+    user_type: input.role,
+  };
+
+  const normalizedPhone = normalizeOptionalText(input.phone);
+  if (normalizedPhone) {
+    profilePayload.phone = normalizedPhone;
+  }
+
+  const normalizedAvatarUrl = normalizeOptionalText(input.avatarUrl);
+  if (normalizedAvatarUrl) {
+    profilePayload.avatar_url = normalizedAvatarUrl;
+  }
+
+  const normalizedBio = normalizeOptionalText(input.bio);
+  if (normalizedBio) {
+    profilePayload.bio = normalizedBio;
+  }
+
+  const normalizedCity = normalizeOptionalText(input.city);
+  if (normalizedCity) {
+    profilePayload.city = normalizedCity;
+  }
+
+  const normalizedState = normalizeOptionalText(input.state);
+  if (normalizedState) {
+    profilePayload.state = normalizedState;
+  }
+
   const profileResult = await client.from('profiles').upsert(
-    {
-      id: input.id,
-      full_name: input.fullName,
-      email: normalizeEmail(input.email),
-      phone: input.phone ?? null,
-      user_type: input.role,
-      avatar_url: input.avatarUrl ?? null,
-      bio: input.bio ?? null,
-      city: input.city ?? null,
-      state: input.state ?? null,
-    },
+    profilePayload,
     { onConflict: 'id' },
   );
 
@@ -692,36 +850,137 @@ export async function createSupabaseUserProfiles(input: {
   }
 
   if (input.role === 'client') {
+    const clientPayload: Record<string, unknown> = {
+      user_id: input.id,
+    };
+
+    const normalizedCep = normalizeOptionalText(input.client?.cep)?.replace(/\D/g, '');
+    if (normalizedCep) {
+      clientPayload.cep = normalizedCep;
+    }
+
+    const normalizedCompanyName = normalizeOptionalText(input.client?.companyName);
+    if (normalizedCompanyName) {
+      clientPayload.company_name = normalizedCompanyName;
+    }
+
+    const normalizedDocumentNumber = normalizeOptionalText(input.client?.documentNumber);
+    if (normalizedDocumentNumber) {
+      clientPayload.document_number = normalizedDocumentNumber;
+    }
+
+    const normalizedContactName = normalizeOptionalText(input.client?.contactName);
+    if (normalizedContactName) {
+      clientPayload.contact_name = normalizedContactName;
+    } else {
+      clientPayload.contact_name = input.fullName;
+    }
+
+    const normalizedCompanyDescription = normalizeOptionalText(input.client?.companyDescription);
+    if (normalizedCompanyDescription) {
+      clientPayload.company_description = normalizedCompanyDescription;
+    }
+
     const clientResult = await client.from('client_profiles').upsert(
-      {
-        user_id: input.id,
-        company_name: input.client?.companyName ?? null,
-        document_number: input.client?.documentNumber ?? null,
-        contact_name: input.client?.contactName ?? null,
-        company_description: input.client?.companyDescription ?? null,
-      },
+      clientPayload,
       { onConflict: 'user_id' },
     );
 
     return !clientResult.error;
   }
 
-  const freelancerResult = await client.from('freelancer_profiles').upsert(
-    {
-      user_id: input.id,
-      professional_title: input.freelancer?.professionalTitle ?? null,
-      skills: input.freelancer?.skills ?? [],
-      experience_level: toDatabaseExperienceLevel(input.freelancer?.experienceLevel),
-      portfolio_url: input.freelancer?.portfolioUrl ?? null,
-      hourly_rate: input.freelancer?.hourlyRate ?? null,
-      availability_status: toDatabaseAvailabilityStatus(input.freelancer?.availabilityStatus),
-      rating_average: input.freelancer?.ratingAverage ?? 0,
-      total_reviews: input.freelancer?.totalReviews ?? 0,
-    },
-    { onConflict: 'user_id' },
-  );
+  const freelancerPayload: Record<string, unknown> = {
+    user_id: input.id,
+  };
+
+  const normalizedProfessionalTitle = normalizeOptionalText(input.freelancer?.professionalTitle);
+  if (normalizedProfessionalTitle) {
+    freelancerPayload.professional_title = normalizedProfessionalTitle;
+  }
+
+  if (Array.isArray(input.freelancer?.skills)) {
+    freelancerPayload.skills = input.freelancer.skills;
+  }
+
+  if (input.freelancer?.experienceLevel) {
+    freelancerPayload.experience_level = toDatabaseExperienceLevel(input.freelancer.experienceLevel);
+  }
+
+  const normalizedPortfolioUrl = normalizeOptionalText(input.freelancer?.portfolioUrl);
+  if (normalizedPortfolioUrl) {
+    freelancerPayload.portfolio_url = normalizedPortfolioUrl;
+  }
+
+  const normalizedBannerUrl = normalizeOptionalText(input.freelancer?.bannerUrl);
+  if (normalizedBannerUrl) {
+    freelancerPayload.banner_url = normalizedBannerUrl;
+  }
+
+  if (typeof input.freelancer?.availabilityStatus === 'string') {
+    freelancerPayload.availability_status = toDatabaseAvailabilityStatus(
+      input.freelancer.availabilityStatus,
+    );
+  }
+
+  if (typeof input.freelancer?.ratingAverage === 'number') {
+    freelancerPayload.rating_average = input.freelancer.ratingAverage;
+  }
+
+  if (typeof input.freelancer?.totalReviews === 'number') {
+    freelancerPayload.total_reviews = input.freelancer.totalReviews;
+  }
+
+  const freelancerResult = await client.from('freelancer_profiles').upsert(freelancerPayload, {
+    onConflict: 'user_id',
+  });
 
   return !freelancerResult.error;
+}
+
+export async function updateSupabaseProfileAvatarUrl(input: {
+  userId: string;
+  accessToken: string;
+  avatarUrl: string;
+}): Promise<boolean> {
+  const client = createSupabaseUserClient(input.accessToken);
+  if (!client) {
+    return false;
+  }
+
+  const normalizedAvatarUrl = normalizeOptionalText(input.avatarUrl);
+  if (!normalizedAvatarUrl) {
+    return false;
+  }
+
+  const { error } = await client
+    .from('profiles')
+    .update({ avatar_url: normalizedAvatarUrl })
+    .eq('id', input.userId);
+
+  return !error;
+}
+
+export async function updateSupabaseFreelancerBannerUrl(input: {
+  userId: string;
+  accessToken: string;
+  bannerUrl: string;
+}): Promise<boolean> {
+  const client = createSupabaseUserClient(input.accessToken);
+  if (!client) {
+    return false;
+  }
+
+  const normalizedBannerUrl = normalizeOptionalText(input.bannerUrl);
+  if (!normalizedBannerUrl) {
+    return false;
+  }
+
+  const { error } = await client
+    .from('freelancer_profiles')
+    .update({ banner_url: normalizedBannerUrl })
+    .eq('user_id', input.userId);
+
+  return !error;
 }
 
 export async function ensureSupabaseUserSubtypeMaterialized(input: {
@@ -749,6 +1008,19 @@ export async function ensureSupabaseUserSubtypeMaterialized(input: {
   const resolvedRole = getExplicitUserRole(profile) ?? input.fallbackRole;
   if (!resolvedRole) {
     return undefined;
+  }
+
+  const profilePatch: Record<string, unknown> = {};
+  if (!getExplicitUserRole(profile)) {
+    profilePatch.user_type = resolvedRole;
+  }
+
+  if (!profile.full_name?.trim() && input.fallbackName) {
+    profilePatch.full_name = input.fallbackName;
+  }
+
+  if (Object.keys(profilePatch).length > 0) {
+    await client.from('profiles').update(profilePatch).eq('id', input.userId);
   }
 
   if (resolvedRole === 'client') {
@@ -794,7 +1066,6 @@ export async function ensureSupabaseUserSubtypeMaterialized(input: {
           legacyFreelancer?.profile.portfolio[0]?.url ??
           legacyFreelancer?.profile.websiteUrl ??
           null,
-        hourly_rate: legacyFreelancer?.profile.averagePrice ?? null,
         availability_status: toDatabaseAvailabilityStatus(legacyFreelancer?.profile.availability),
         rating_average: 0,
         total_reviews: 0,
@@ -806,8 +1077,11 @@ export async function ensureSupabaseUserSubtypeMaterialized(input: {
   return resolvedRole;
 }
 
-export async function findSessionUserByEmail(email: string): Promise<UserLookup | undefined> {
-  const bundle = await loadSupabaseUserBundleByEmail(email);
+export async function findSessionUserByEmail(
+  email: string,
+  accessToken?: string,
+): Promise<UserLookup | undefined> {
+  const bundle = await loadSupabaseUserBundleByEmail(email, accessToken);
   const sessionUser = bundle ? buildSessionUserFromBundle(bundle) : undefined;
   if (bundle && sessionUser) {
     return {
@@ -817,128 +1091,64 @@ export async function findSessionUserByEmail(email: string): Promise<UserLookup 
     };
   }
 
-  // Compatibility-only fallback:
-  // active when the account still exists only in the local shadow store.
-  const legacy = findLegacySessionUserByEmail(email);
-  if (!legacy) {
-    return undefined;
-  }
-
-  return {
-    user: {
-      id: legacy.id,
-      name: legacy.name,
-      role: legacy.role,
-    },
-    email: normalizeEmail(email),
-    source: 'legacy',
-    passwordHash: legacy.passwordHash,
-  };
+  return undefined;
 }
 
-export async function findSessionUserById(id: string, role?: UserRole): Promise<SessionUser | undefined> {
-  const bundle = await loadSupabaseUserBundle(id);
-  const sessionUser = bundle ? buildSessionUserFromBundle(bundle, role) : undefined;
-  if (sessionUser) {
-    return sessionUser;
-  }
-
-  // Supabase-managed ids must not keep authenticating from a local shadow
-  // once the canonical profile bundle is gone. This prevents deleted Auth users
-  // from surviving through a stale HTTP-only app session.
-  if (!bundle && isSupabaseManagedUserId(id)) {
-    return undefined;
-  }
-
-  if (!role) {
-    return undefined;
-  }
-
-  if (role === 'client') {
-    // Compatibility-only local lookup for older client accounts not yet resolved by Supabase id.
-    const legacyClient = findClientCompatibilityShadow(id);
-    if (!legacyClient) {
-      return undefined;
-    }
-
-    const bundleByEmail = await loadSupabaseUserBundleByEmail(legacyClient.profile.email);
-    const sessionUserByEmail = bundleByEmail
-      ? buildSessionUserFromBundle(bundleByEmail, role)
-      : undefined;
-    if (sessionUserByEmail) {
-      return sessionUserByEmail;
-    }
-
-    return {
-      id: legacyClient.profile.id,
-      name: legacyClient.profile.name,
-      role,
-    };
-  }
-
-  const legacyFreelancer = findFreelancerLocalShadow(id);
-  if (!legacyFreelancer) {
-    return undefined;
-  }
-
-  const bundleByEmail = await loadSupabaseUserBundleByEmail(legacyFreelancer.email);
-  const sessionUserByEmail = bundleByEmail
-    ? buildSessionUserFromBundle(bundleByEmail, role)
-    : undefined;
-  if (sessionUserByEmail) {
-    return sessionUserByEmail;
-  }
-
-  return {
-    id: legacyFreelancer.profile.id,
-    name: legacyFreelancer.profile.name,
-    role,
-  };
+export async function findSessionUserById(
+  id: string,
+  role?: UserRole,
+  accessToken?: string,
+): Promise<SessionUser | undefined> {
+  const bundle = await loadSupabaseUserBundle(id, accessToken);
+  return bundle ? buildSessionUserFromBundle(bundle, role) : undefined;
 }
 
-export async function findClientRecordById(id: string): Promise<StoredClient | undefined> {
-  // Client compatibility shadow is consulted only when Supabase cannot yet resolve
-  // the account directly by canonical id.
-  const legacy = findClientCompatibilityShadow(id);
-  const bundle =
-    (await loadSupabaseUserBundle(id)) ??
-    (legacy ? await loadSupabaseUserBundleByEmail(legacy.profile.email) : null);
+export async function findClientRecordById(
+  id: string,
+  accessToken?: string,
+): Promise<StoredClient | undefined> {
+  const bundle = await loadSupabaseUserBundle(id, accessToken);
+  if (!bundle) {
+    return undefined;
+  }
 
-  if (bundle && inferUserRoleFromBundle(bundle, legacy ? 'client' : undefined) === 'client') {
+  const legacy =
+    findLegacyClientRecordById(id) ??
+    findLegacyClientRecordByEmail(bundle.profile.email);
+  if (inferUserRoleFromBundle(bundle, 'client') === 'client') {
     return mergeClientFromSupabase(bundle, legacy);
   }
 
-  return legacy;
+  return undefined;
 }
 
-export async function findFreelancerRecordById(id: string): Promise<StoredFreelancer | undefined> {
-  // Freelancer local shadow is consulted only for compatibility residue and
-  // showcase/operational fields outside Block 1 schema.
-  const legacy = findFreelancerLocalShadow(id);
-  const bundle =
-    (await loadSupabaseUserBundle(id)) ??
-    (legacy ? await loadSupabaseUserBundleByEmail(legacy.email) : null);
+export async function findFreelancerRecordById(
+  id: string,
+  accessToken?: string,
+): Promise<StoredFreelancer | undefined> {
+  const bundle = await loadSupabaseUserBundle(id, accessToken);
+  if (!bundle) {
+    return undefined;
+  }
 
-  if (bundle && inferUserRoleFromBundle(bundle, legacy ? 'freelancer' : undefined) === 'freelancer') {
+  const legacy =
+    findFreelancerLocalShadow(id) ??
+    findFreelancerLocalShadow(bundle.profile.email);
+  if (inferUserRoleFromBundle(bundle, 'freelancer') === 'freelancer') {
     return mergeFreelancerFromSupabase(bundle, legacy);
   }
 
-  return legacy;
+  return undefined;
 }
 
 export async function listPublicFreelancers(): Promise<Freelancer[]> {
   const profiles = await selectProfilesByUserType('freelancer');
-  const legacyPublicFreelancers = listLegacyPublicFreelancers();
   if (profiles.length === 0) {
-    // Public fallback while there are still local demo/showcase freelancers
-    // not materialized in Supabase. Remove in the later showcase persistence block.
-    return legacyPublicFreelancers;
+    return [];
   }
 
   const subtypeMap = await selectFreelancerProfilesByUserIds(profiles.map((profile) => profile.id));
-  const supabaseEmailSet = new Set(profiles.map((profile) => profile.email.toLowerCase()));
-  const supabaseIdSet = new Set(profiles.map((profile) => profile.id));
-  const supabaseFreelancers = profiles
+  return profiles
     .map((profile) => {
       const legacyShadow = findFreelancerLocalShadow(profile.id) ?? findFreelancerLocalShadow(profile.email);
       const bundle: Exclude<SupabaseUserBundle, null> = {
@@ -963,28 +1173,6 @@ export async function listPublicFreelancers(): Promise<Freelancer[]> {
       return left.profile.name.localeCompare(right.profile.name, 'pt-BR');
     })
     .map((freelancer) => freelancer.profile);
-  const legacyOnlyFreelancers = legacyPublicFreelancers.filter((freelancer) => {
-    const legacyShadow = findFreelancerLocalShadow(freelancer.id);
-    if (!legacyShadow) {
-      return true;
-    }
-
-    return (
-      !supabaseIdSet.has(legacyShadow.profile.id) &&
-      !supabaseEmailSet.has(legacyShadow.email.toLowerCase())
-    );
-  });
-
-  return [...supabaseFreelancers, ...legacyOnlyFreelancers].sort((left, right) => {
-    const leftRank = left.subscriptionTier === 'booster' ? 0 : 1;
-    const rightRank = right.subscriptionTier === 'booster' ? 0 : 1;
-
-    if (leftRank !== rightRank) {
-      return leftRank - rightRank;
-    }
-
-    return left.name.localeCompare(right.name, 'pt-BR');
-  });
 }
 
 export async function recordFreelancerProfileView(slug: string): Promise<Freelancer | undefined> {
@@ -1003,11 +1191,14 @@ export async function recordFreelancerProfileView(slug: string): Promise<Freelan
   return freelancer;
 }
 
-export async function getClientDashboard(id: string): Promise<ClientDashboard | undefined> {
+export async function getClientDashboard(
+  id: string,
+  accessToken?: string,
+): Promise<ClientDashboard | undefined> {
   // Dashboard assembly is intentionally split:
   // - identity/profile comes from Supabase
   // - contacts and UI conveniences remain local operational data for now
-  const client = await findClientRecordById(id);
+  const client = await findClientRecordById(id, accessToken);
   if (!client) {
     return undefined;
   }
@@ -1021,18 +1212,21 @@ export async function getClientDashboard(id: string): Promise<ClientDashboard | 
       clientName: client.profile.name,
     }).slice(0, 5),
     notifications: [
-      'Seu contato com freelancers foi registrado com sucesso.',
-      'Perfis booster aparecem primeiro nas pesquisas.',
-      'Você pode acompanhar o histórico das conversas sem sair da plataforma.',
+      'Sua conversa foi registrada no chat interno da plataforma.',
+      'Novas respostas aparecem direto na central de mensagens.',
+      'Toda a comunicação oficial entre cliente e freelancer fica dentro do site.',
     ],
   };
 }
 
-export async function getFreelancerDashboard(id: string): Promise<FreelancerDashboard | undefined> {
+export async function getFreelancerDashboard(
+  id: string,
+  accessToken?: string,
+): Promise<FreelancerDashboard | undefined> {
   // Dashboard assembly is intentionally split:
   // - identity/profile comes from Supabase
   // - subscription/metrics/recent contacts remain local operational residue for now
-  const freelancer = await findFreelancerRecordById(id);
+  const freelancer = await findFreelancerRecordById(id, accessToken);
   if (!freelancer) {
     return undefined;
   }
@@ -1054,57 +1248,36 @@ export async function getFreelancerDashboard(id: string): Promise<FreelancerDash
   };
 }
 
-export function createLegacyClientShadow(input: StoredClient): ClientProfile {
-  // Client compatibility shadow:
-  // active only when sign-up cannot write client_profiles immediately because
-  // email confirmation prevents getting an authenticated access token.
-  // Resolve by retiring local user shadows after the migration compatibility window.
-  return addLocalClientShadow(input);
-}
+export async function getConversationInbox(
+  id: string,
+  role: UserRole,
+  accessToken?: string,
+): Promise<ConversationInbox | undefined> {
+  if (role === 'client') {
+    const client = await findClientRecordById(id, accessToken);
+    if (!client) {
+      return undefined;
+    }
 
-export function createLegacyFreelancerShadow(input: StoredFreelancer): Freelancer {
-  // Freelancer operational shadow:
-  // active when either:
-  // 1. sign-up cannot write freelancer_profiles immediately because email confirmation
-  //    prevents an authenticated access token
-  // 2. the profile still needs showcase/operational fields outside Block 1 schema
-  // Resolve item 1 after compatibility retirement.
-  // Resolve item 2 in the later operational/showcase persistence block.
-  return addLocalFreelancerShadow(input);
-}
-
-export function purgeLegacyUserShadow(input: {
-  id: string;
-  email: string;
-  role: UserRole;
-}) {
-  deleteSessionsByUserId(input.id);
-
-  if (input.role === 'client') {
-    removeLocalClientShadow({
-      id: input.id,
-      email: input.email,
-    });
-    return;
+    return {
+      contacts: listContactsByClientIdentity({
+        clientId: client.profile.id,
+        clientEmail: client.profile.email,
+        clientName: client.profile.name,
+      }),
+    };
   }
 
-  removeLocalFreelancerShadow({
-    id: input.id,
-    email: input.email,
-  });
-}
+  const freelancer = await findFreelancerRecordById(id, accessToken);
+  if (!freelancer) {
+    return undefined;
+  }
 
-export function getNextClientId(): string {
-  // Local-only id reservation for the fallback path where Supabase Auth is unavailable.
-  return getLegacyNextClientId();
-}
-
-export function getNextFreelancerId(): string {
-  // Local-only id reservation for the fallback path where Supabase Auth is unavailable.
-  return getLegacyNextFreelancerId();
-}
-
-export function ensureUniqueFreelancerSlug(baseSlug: string): string {
-  // Slug uniqueness is still local because slug is a showcase concern outside Block 1 schema.
-  return ensureLegacyFreelancerSlug(baseSlug);
+  return {
+    contacts: listContactsByFreelancerIdentity({
+      freelancerId: freelancer.profile.id,
+      freelancerEmail: freelancer.email,
+      freelancerName: freelancer.profile.name,
+    }),
+  };
 }

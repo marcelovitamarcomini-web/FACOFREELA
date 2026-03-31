@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 
 import type { SessionUser } from '../../shared/contracts';
 import { api } from '../lib/api';
+import { supabase } from '../lib/supabase';
 
 interface AppSessionContextValue {
   session: SessionUser | null;
@@ -19,9 +20,10 @@ export function AppSessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    const requestVersion = ++requestVersionRef.current;
 
     async function loadSession() {
+      const requestVersion = ++requestVersionRef.current;
+
       try {
         const response = await api.getSession();
 
@@ -39,10 +41,17 @@ export function AppSessionProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void loadSession();
+    });
+
     void loadSession();
 
     return () => {
       cancelled = true;
+      subscription.unsubscribe();
     };
   }, []);
 

@@ -9,6 +9,7 @@
     "dev:server": "tsx watch server/src/index.ts",
     "build": "npm run check && npm run build:client && npm run build:server",
     "build:client": "vite build",
+    "build:hostgator": "npm run build:client && powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-hostgator-package.ps1",
     "build:server": "tsc -p tsconfig.server.json",
     "check": "tsc --noEmit",
     "preview": "vite preview"

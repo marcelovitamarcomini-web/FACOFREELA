@@ -1,0 +1,10 @@
+Options -MultiViews
+
+RewriteEngine On
+
+# Keep Apache away from real files and let React Router resolve application routes.
+RewriteRule ^index\.html$ - [L]
+RewriteCond %{REQUEST_URI} !^/api/ [NC]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . index.html [L]

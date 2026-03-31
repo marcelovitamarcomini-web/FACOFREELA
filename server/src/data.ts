@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+﻿import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type {
@@ -10,25 +10,26 @@ import type {
   FreelancerPlanTier,
   FreelancerDashboard,
   PortfolioItem,
-  SessionUser,
   SubscriptionPlan,
   UserRole,
 } from '../../shared/contracts.js';
-import { freelancerPlanCatalog, getFreelancerPlanPrice } from '../../shared/contracts.js';
 import {
-  createPasswordHash,
+  freelancerPlanCatalog,
+  getFreelancerPlanPrice,
+  platformContactChannel,
+} from '../../shared/contracts.js';
+import {
   createSessionExpiry,
   createSessionToken,
   isSessionExpired,
 } from './auth.js';
 
 export interface StoredFreelancer {
-  // Local freelancer shadow only.
-  // It is not the source of identity after Block 1.
+  // Local freelancer residue only.
+  // It is not used for cadastro or autenticação.
   // It survives temporarily for operational/showcase fields not present in Supabase yet.
   email: string;
   hasCnpj: boolean;
-  passwordHash: string;
   phone: string;
   profile: Freelancer;
   subscription: SubscriptionPlan;
@@ -36,10 +37,9 @@ export interface StoredFreelancer {
 }
 
 export interface StoredClient {
-  // Local client compatibility shadow only.
-  // It exists only for accounts that cannot finish subtype persistence at sign-up time.
+  // Local client residue only.
+  // It is no longer used for cadastro or autenticação.
   profile: ClientProfile;
-  passwordHash: string;
 }
 
 export interface StoredSession {
@@ -49,12 +49,15 @@ export interface StoredSession {
   userId: string;
   role: UserRole;
   expiresAt: string;
+  supabaseAccessToken?: string | null;
+  supabaseRefreshToken?: string | null;
+  supabaseAccessTokenExpiresAt?: string | null;
 }
 
 export interface AppStore {
-  // Local shadows for user compatibility and showcase residue.
+  // Local freelancer residue for operational/showcase fields outside Supabase.
   freelancers: StoredFreelancer[];
-  // Local client compatibility shadows.
+  // Local client residue kept only while some operational flows still read it.
   clients: StoredClient[];
   // Operational contact persistence. This remains local until a later persistence block.
   contacts: ContactMessage[];
@@ -64,6 +67,8 @@ export interface AppStore {
 
 const DATA_DIR = resolve(process.cwd(), 'server', 'data');
 const STORE_FILE = resolve(DATA_DIR, 'store.json');
+const supabaseUserIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function basePortfolio(url: string): PortfolioItem[] {
   return [
@@ -139,7 +144,8 @@ function createSeedContact(input: Omit<ContactMessage, 'messages'>): ContactMess
 }
 
 function normalizeContactChannel(channel: unknown): ContactMessage['channel'] {
-  return channel === 'Plataforma' ? 'Plataforma' : 'E-mail';
+  void channel;
+  return platformContactChannel;
 }
 
 function createInitialContactMessage(contact: Partial<ContactMessage>): ContactThreadMessage {
@@ -221,320 +227,9 @@ function hydrateContact(store: AppStore, contact: ContactMessage): ContactMessag
 
 function createSeedStore(): AppStore {
   return {
-    freelancers: [
-      {
-        email: 'aline@facofreela.com',
-        hasCnpj: false,
-        passwordHash: createPasswordHash('123456'),
-        phone: '(11) 99999-1111',
-        profile: {
-          id: 'freelancer-1',
-          slug: 'aline-rocha-ux-designer',
-          name: 'Aline Rocha',
-          profession: 'UX/UI Designer',
-          category: 'Design',
-          summary: 'Design de produtos digitais com foco em conversão, clareza e experiência do usuário.',
-          description:
-            'Ajudo startups e negócios digitais a transformar processos confusos em experiências intuitivas. Atuo com discovery, interface, design system e protótipos navegáveis para produtos web e mobile.',
-          location: 'São Paulo, SP',
-          experienceLevel: 'Sênior',
-          yearsExperience: 8,
-          averagePrice: 1800,
-          skills: ['Figma', 'Design System', 'UX Research', 'Prototipagem'],
-          portfolio: basePortfolio('https://www.behance.net/'),
-          avatarUrl:
-            'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80',
-          bannerUrl:
-            'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1600&q=80',
-          linkedinUrl: 'https://www.linkedin.com/',
-          websiteUrl: 'https://dribbble.com/',
-          whatsapp: '5511999991111',
-          verified: true,
-          availability: 'Aceitando novos projetos para abril.',
-          memberSince: '2024-04-18',
-        },
-        subscription: createSubscriptionPlan('normal', false, {
-          status: 'active',
-          startedAt: '2026-02-10',
-          endsAt: '2026-03-10',
-        }),
-        metrics: {
-          profileViews: 842,
-          contactClicks: 118,
-          messagesReceived: 17,
-        },
-      },
-      {
-        email: 'bruno@facofreela.com',
-        hasCnpj: true,
-        passwordHash: createPasswordHash('123456'),
-        phone: '(21) 98888-2222',
-        profile: {
-          id: 'freelancer-2',
-          slug: 'bruno-silva-desenvolvedor-full-stack',
-          name: 'Bruno Silva',
-          profession: 'Desenvolvedor Full Stack',
-          category: 'Programação',
-          summary: 'Construo aplicações web escaláveis com foco em performance, produto e deploy contínuo.',
-          description:
-            'Desenvolvedor com experiência em React, Node.js, APIs REST e arquitetura para produtos digitais. Trabalho em MVPs, painéis administrativos, integrações e manutenção evolutiva.',
-          location: 'Rio de Janeiro, RJ',
-          experienceLevel: 'Sênior',
-          yearsExperience: 10,
-          averagePrice: 2400,
-          skills: ['React', 'TypeScript', 'Node.js', 'PostgreSQL'],
-          portfolio: basePortfolio('https://github.com/'),
-          avatarUrl:
-            'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80',
-          bannerUrl:
-            'https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1600&q=80',
-          linkedinUrl: 'https://www.linkedin.com/',
-          websiteUrl: 'https://github.com/',
-          whatsapp: '5521988882222',
-          verified: true,
-          availability: 'Disponível para squads de produto e entregas sob escopo fechado.',
-          memberSince: '2023-11-02',
-        },
-        subscription: createSubscriptionPlan('booster', true, {
-          status: 'active',
-          startedAt: '2026-02-26',
-          endsAt: '2026-03-26',
-        }),
-        metrics: {
-          profileViews: 1246,
-          contactClicks: 204,
-          messagesReceived: 29,
-        },
-      },
-      {
-        email: 'camila@facofreela.com',
-        hasCnpj: true,
-        passwordHash: createPasswordHash('123456'),
-        phone: '(31) 97777-3333',
-        profile: {
-          id: 'freelancer-3',
-          slug: 'camila-souza-estrategista-de-marketing',
-          name: 'Camila Souza',
-          profession: 'Estrategista de Marketing Digital',
-          category: 'Marketing Digital',
-          summary: 'Planejamento, mídia e funil de aquisição para negócios que precisam crescer com previsibilidade.',
-          description:
-            'Atuo com diagnóstico de aquisição, campanhas de performance, estruturação de CRM e copy para landing pages. Meu foco é transformar tráfego em receita com clareza de métricas.',
-          location: 'Belo Horizonte, MG',
-          experienceLevel: 'Pleno',
-          yearsExperience: 6,
-          averagePrice: 1500,
-          skills: ['Meta Ads', 'Google Ads', 'CRM', 'Copywriting'],
-          portfolio: basePortfolio('https://www.notion.so/'),
-          avatarUrl:
-            'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=400&q=80',
-          bannerUrl:
-            'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=1600&q=80',
-          linkedinUrl: 'https://www.linkedin.com/',
-          websiteUrl: 'https://www.notion.so/',
-          whatsapp: '5531977773333',
-          verified: true,
-          availability: 'Atendo lançamentos, e-commerce e negócios locais.',
-          memberSince: '2025-01-14',
-        },
-        subscription: createSubscriptionPlan('booster', true, {
-          status: 'active',
-          startedAt: '2026-02-15',
-          endsAt: '2026-03-15',
-        }),
-        metrics: {
-          profileViews: 692,
-          contactClicks: 86,
-          messagesReceived: 13,
-        },
-      },
-      {
-        email: 'diego@facofreela.com',
-        hasCnpj: false,
-        passwordHash: createPasswordHash('123456'),
-        phone: '(81) 96666-4444',
-        profile: {
-          id: 'freelancer-4',
-          slug: 'diego-alves-editor-de-video',
-          name: 'Diego Alves',
-          profession: 'Editor de Vídeo',
-          category: 'Edição de Vídeo',
-          summary: 'Edição comercial para lançamentos, social media e vídeos institucionais com ritmo e clareza.',
-          description:
-            'Produzo vídeos orientados a resultado, com cortes estratégicos, motion leve e adaptação para múltiplos formatos. Trabalho com creators, infoprodutos e marcas em expansão.',
-          location: 'Recife, PE',
-          experienceLevel: 'Pleno',
-          yearsExperience: 5,
-          averagePrice: 1200,
-          skills: ['Premiere', 'After Effects', 'CapCut', 'Storytelling'],
-          portfolio: basePortfolio('https://vimeo.com/'),
-          avatarUrl:
-            'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=400&q=80',
-          bannerUrl:
-            'https://images.unsplash.com/photo-1478720568477-152d9b164e26?auto=format&fit=crop&w=1600&q=80',
-          linkedinUrl: 'https://www.linkedin.com/',
-          websiteUrl: 'https://vimeo.com/',
-          whatsapp: '5581966664444',
-          verified: false,
-          availability: 'Agenda com encaixe para pacotes recorrentes.',
-          memberSince: '2025-06-08',
-        },
-        subscription: createSubscriptionPlan('normal', false, {
-          status: 'active',
-          startedAt: '2026-02-28',
-          endsAt: '2026-03-28',
-        }),
-        metrics: {
-          profileViews: 514,
-          contactClicks: 55,
-          messagesReceived: 9,
-        },
-      },
-      {
-        email: 'elis@facofreela.com',
-        hasCnpj: true,
-        passwordHash: createPasswordHash('123456'),
-        phone: '(41) 95555-5555',
-        profile: {
-          id: 'freelancer-5',
-          slug: 'elis-pereira-redatora-seo',
-          name: 'Elis Pereira',
-          profession: 'Redatora SEO',
-          category: 'Redação',
-          summary: 'Conteúdo que posiciona no Google e melhora a conversão da jornada comercial.',
-          description:
-            'Crio artigos, páginas estratégicas e materiais ricos com pesquisa de intenção de busca, arquitetura de conteúdo e linguagem adaptada ao público. Também reviso textos de vendas.',
-          location: 'Curitiba, PR',
-          experienceLevel: 'Pleno',
-          yearsExperience: 7,
-          averagePrice: 950,
-          skills: ['SEO', 'Conteúdo', 'Pesquisa de Palavra-chave', 'Ghostwriting'],
-          portfolio: basePortfolio('https://medium.com/'),
-          avatarUrl:
-            'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80',
-          bannerUrl:
-            'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=1600&q=80',
-          linkedinUrl: 'https://www.linkedin.com/',
-          websiteUrl: 'https://medium.com/',
-          whatsapp: '5541955555555',
-          verified: true,
-          availability: 'Recebo demandas avulsas e calendários mensais.',
-          memberSince: '2024-09-03',
-        },
-        subscription: createSubscriptionPlan('normal', true, {
-          status: 'active',
-          startedAt: '2026-02-18',
-          endsAt: '2026-03-18',
-        }),
-        metrics: {
-          profileViews: 477,
-          contactClicks: 61,
-          messagesReceived: 11,
-        },
-      },
-      {
-        email: 'fabio@facofreela.com',
-        hasCnpj: true,
-        passwordHash: createPasswordHash('123456'),
-        phone: '(51) 94444-6666',
-        profile: {
-          id: 'freelancer-6',
-          slug: 'fabio-lima-consultor-de-operacoes',
-          name: 'Fábio Lima',
-          profession: 'Consultor de Operações',
-          category: 'Consultoria',
-          summary: 'Organização de processos, indicadores e operação para empresas em fase de crescimento.',
-          description:
-            'Atuo com diagnóstico de gargalos, padronização operacional, construção de rituais de gestão e acompanhamento de indicadores para pequenos e médios negócios.',
-          location: 'Porto Alegre, RS',
-          experienceLevel: 'Sênior',
-          yearsExperience: 12,
-          averagePrice: 2800,
-          skills: ['Processos', 'KPIs', 'Gestão', 'Planejamento'],
-          portfolio: basePortfolio('https://www.notion.so/'),
-          avatarUrl:
-            'https://images.unsplash.com/photo-1504593811423-6dd665756598?auto=format&fit=crop&w=400&q=80',
-          bannerUrl:
-            'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&w=1600&q=80',
-          linkedinUrl: 'https://www.linkedin.com/',
-          websiteUrl: 'https://www.notion.so/',
-          whatsapp: '5551944446666',
-          verified: true,
-          availability: 'Atendimento por diagnóstico e implantação.',
-          memberSince: '2023-06-21',
-        },
-        subscription: createSubscriptionPlan('normal', true, {
-          status: 'expired',
-          startedAt: '2026-01-01',
-          endsAt: '2026-02-01',
-        }),
-        metrics: {
-          profileViews: 301,
-          contactClicks: 22,
-          messagesReceived: 5,
-        },
-      },
-    ],
-    clients: [
-      {
-        profile: {
-          id: 'client-1',
-          name: 'Marina Costa',
-          email: 'marina@cliente.com',
-          phone: '(11) 97777-0000',
-          location: 'Campinas, SP',
-          createdAt: '2026-02-14',
-        },
-        passwordHash: createPasswordHash('123456'),
-      },
-    ],
-    contacts: [
-      createSeedContact({
-        id: 'contact-1',
-        freelancerId: 'freelancer-1',
-        freelancerName: 'Aline Rocha',
-        freelancerEmail: 'aline@facofreela.com',
-        clientId: 'client-1',
-        clientName: 'Marina Costa',
-        clientLocation: 'Campinas, SP',
-        clientEmail: 'marina@cliente.com',
-        clientPhone: '(11) 97777-0000',
-        subject: 'Landing page para SaaS B2B',
-        message: 'Gostaria de entender como você estrutura um redesign com foco em conversão.',
-        channel: 'Plataforma',
-        createdAt: '2026-03-07T14:15:00.000Z',
-        status: 'Novo',
-      }),
-      createSeedContact({
-        id: 'contact-2',
-        freelancerId: 'freelancer-1',
-        freelancerName: 'Aline Rocha',
-        freelancerEmail: 'aline@facofreela.com',
-        clientName: 'Henrique Vidal',
-        clientLocation: 'São Paulo, SP',
-        subject: 'Sistema interno para operação',
-        message: 'Preciso desenhar uma experiência mais simples para o painel da equipe comercial.',
-        channel: 'E-mail',
-        createdAt: '2026-03-05T11:20:00.000Z',
-        status: 'Respondido',
-      }),
-      createSeedContact({
-        id: 'contact-3',
-        freelancerId: 'freelancer-2',
-        freelancerName: 'Bruno Silva',
-        freelancerEmail: 'bruno@facofreela.com',
-        clientId: 'client-1',
-        clientName: 'Marina Costa',
-        clientLocation: 'Campinas, SP',
-        clientEmail: 'marina@cliente.com',
-        clientPhone: '(11) 97777-0000',
-        subject: 'MVP em React e API',
-        message: 'Procuro alguém para estruturar a primeira versão da nossa plataforma web.',
-        channel: 'Plataforma',
-        createdAt: '2026-03-02T09:00:00.000Z',
-        status: 'Novo',
-      }),
-    ],
+    freelancers: [],
+    clients: [],
+    contacts: [],
     sessions: [],
   };
 }
@@ -560,17 +255,36 @@ function removeExpiredSessions(store: AppStore): boolean {
 
 function normalizeStore(store: AppStore): boolean {
   let changed = removeExpiredSessions(store);
-  const normalizedFreelancers = store.freelancers.map((freelancer) => ({
-    ...freelancer,
-    hasCnpj: freelancer.hasCnpj === true,
-    subscription: normalizeSubscriptionPlan(freelancer.subscription, freelancer.hasCnpj === true),
-  }));
-  const normalizedContacts = store.contacts.map((contact) => normalizeContactRecord(store, contact));
+  const normalizedSessions = store.sessions.filter((session) =>
+    supabaseUserIdPattern.test(session.userId),
+  );
+  const normalizedFreelancers = store.freelancers
+    .filter((freelancer) => supabaseUserIdPattern.test(freelancer.profile.id))
+    .map((freelancer) => ({
+      email: freelancer.email,
+      hasCnpj: freelancer.hasCnpj === true,
+      phone: freelancer.phone,
+      profile: freelancer.profile,
+      subscription: normalizeSubscriptionPlan(freelancer.subscription, freelancer.hasCnpj === true),
+      metrics: freelancer.metrics,
+    }));
 
   if (JSON.stringify(normalizedFreelancers) !== JSON.stringify(store.freelancers)) {
     store.freelancers = normalizedFreelancers;
     changed = true;
   }
+
+  if (JSON.stringify(normalizedSessions) !== JSON.stringify(store.sessions)) {
+    store.sessions = normalizedSessions;
+    changed = true;
+  }
+
+  if (store.clients.length > 0) {
+    store.clients = [];
+    changed = true;
+  }
+
+  const normalizedContacts = store.contacts.map((contact) => normalizeContactRecord(store, contact));
 
   if (JSON.stringify(normalizedContacts) !== JSON.stringify(store.contacts)) {
     store.contacts = normalizedContacts;
@@ -580,10 +294,15 @@ function normalizeStore(store: AppStore): boolean {
   return changed;
 }
 
+function stripUtf8Bom(value: string): string {
+  return value.charCodeAt(0) === 0xfeff ? value.slice(1) : value;
+}
+
 function readStore(): AppStore {
   ensureStoreFile();
 
-  const store = JSON.parse(readFileSync(STORE_FILE, 'utf8')) as AppStore;
+  const rawStore = readFileSync(STORE_FILE, 'utf8');
+  const store = JSON.parse(stripUtf8Bom(rawStore)) as AppStore;
   const changed = normalizeStore(store);
 
   if (changed) {
@@ -605,71 +324,6 @@ function mutateStore<T>(mutate: (store: AppStore) => T): T {
   writeStore(store);
 
   return result;
-}
-
-function nextId(prefix: string, ids: string[]): string {
-  const maxId = ids.reduce((currentMax, id) => {
-    const suffix = Number(id.replace(`${prefix}-`, ''));
-
-    return Number.isInteger(suffix) ? Math.max(currentMax, suffix) : currentMax;
-  }, 0);
-
-  return `${prefix}-${maxId + 1}`;
-}
-
-export function getNextClientId(): string {
-  const store = readStore();
-
-  return nextId(
-    'client',
-    store.clients.map((client) => client.profile.id),
-  );
-}
-
-export function getNextFreelancerId(): string {
-  const store = readStore();
-
-  return nextId(
-    'freelancer',
-    store.freelancers.map((freelancer) => freelancer.profile.id),
-  );
-}
-
-export function ensureUniqueFreelancerSlug(baseSlug: string): string {
-  const store = readStore();
-  let nextSlug = baseSlug;
-  let suffix = 2;
-
-  while (store.freelancers.some((freelancer) => freelancer.profile.slug === nextSlug)) {
-    nextSlug = `${baseSlug}-${suffix}`;
-    suffix += 1;
-  }
-
-  return nextSlug;
-}
-
-export function listPublicFreelancers(): Freelancer[] {
-  const store = readStore();
-
-  // Compatibility-only public fallback for freelancer showcase cards.
-  // Canonical user identity is already in Supabase; this remains only while
-  // showcase/operational freelancer fields are still local.
-  return store.freelancers
-    .filter((item) => item.subscription.status === 'active')
-    .sort((left, right) => {
-      const leftRank = left.subscription.tier === 'booster' ? 0 : 1;
-      const rightRank = right.subscription.tier === 'booster' ? 0 : 1;
-
-      if (leftRank !== rightRank) {
-        return leftRank - rightRank;
-      }
-
-      return left.profile.name.localeCompare(right.profile.name, 'pt-BR');
-    })
-    .map((item) => ({
-      ...item.profile,
-      subscriptionTier: item.subscription.tier,
-    }));
 }
 
 export function findFreelancerRecordById(id: string): StoredFreelancer | undefined {
@@ -705,41 +359,13 @@ export function findContactById(id: string): ContactMessage | undefined {
   return contact ? hydrateContact(store, contact) : undefined;
 }
 
-export function findSessionUserByEmail(
-  email: string,
-): (SessionUser & {
-  passwordHash: string;
-}) | undefined {
-  // Compatibility-only password lookup for local shadows.
-  // Triggered only when a user still exists locally but is not fully materialized
-  // in Supabase auth/profile flow.
-  const store = readStore();
-  const normalizedEmail = email.trim().toLowerCase();
-
-  const freelancer = store.freelancers.find((item) => item.email.toLowerCase() === normalizedEmail);
-  if (freelancer) {
-    return {
-      id: freelancer.profile.id,
-      name: freelancer.profile.name,
-      role: 'freelancer',
-      passwordHash: freelancer.passwordHash,
-    };
-  }
-
-  const client = store.clients.find((item) => item.profile.email.toLowerCase() === normalizedEmail);
-  if (client) {
-    return {
-      id: client.profile.id,
-      name: client.profile.name,
-      role: 'client',
-      passwordHash: client.passwordHash,
-    };
-  }
-
-  return undefined;
-}
-
-export function createSession(input: { userId: string; role: UserRole }): StoredSession {
+export function createSession(input: {
+  userId: string;
+  role: UserRole;
+  supabaseAccessToken?: string | null;
+  supabaseRefreshToken?: string | null;
+  supabaseAccessTokenExpiresAt?: string | null;
+}): StoredSession {
   // Local app session store. This is operational state, not user identity.
   return mutateStore((store) => {
     const session: StoredSession = {
@@ -747,6 +373,9 @@ export function createSession(input: { userId: string; role: UserRole }): Stored
       userId: input.userId,
       role: input.role,
       expiresAt: createSessionExpiry(),
+      supabaseAccessToken: input.supabaseAccessToken ?? null,
+      supabaseRefreshToken: input.supabaseRefreshToken ?? null,
+      supabaseAccessTokenExpiresAt: input.supabaseAccessTokenExpiresAt ?? null,
     };
 
     store.sessions.unshift(session);
@@ -761,69 +390,31 @@ export function findSession(token: string): StoredSession | undefined {
   return store.sessions.find((session) => session.token === token);
 }
 
+export function updateSessionAuthState(
+  token: string,
+  input: {
+    supabaseAccessToken?: string | null;
+    supabaseRefreshToken?: string | null;
+    supabaseAccessTokenExpiresAt?: string | null;
+  },
+): StoredSession | undefined {
+  return mutateStore((store) => {
+    const session = store.sessions.find((item) => item.token === token);
+    if (!session) {
+      return undefined;
+    }
+
+    session.supabaseAccessToken = input.supabaseAccessToken ?? null;
+    session.supabaseRefreshToken = input.supabaseRefreshToken ?? null;
+    session.supabaseAccessTokenExpiresAt = input.supabaseAccessTokenExpiresAt ?? null;
+
+    return session;
+  });
+}
+
 export function deleteSession(token: string) {
   mutateStore((store) => {
     store.sessions = store.sessions.filter((session) => session.token !== token);
-  });
-}
-
-export function deleteSessionsByUserId(userId: string) {
-  mutateStore((store) => {
-    store.sessions = store.sessions.filter((session) => session.userId !== userId);
-  });
-}
-
-export function addClient(input: StoredClient): ClientProfile {
-  // Writes a client compatibility shadow only. Not canonical user persistence.
-  return mutateStore((store) => {
-    store.clients.unshift(input);
-
-    return input.profile;
-  });
-}
-
-export function removeClientShadow(input: { id?: string; email?: string }) {
-  const normalizedEmail = input.email?.trim().toLowerCase();
-
-  mutateStore((store) => {
-    store.clients = store.clients.filter((client) => {
-      if (input.id && client.profile.id === input.id) {
-        return false;
-      }
-
-      if (normalizedEmail && client.profile.email.toLowerCase() === normalizedEmail) {
-        return false;
-      }
-
-      return true;
-    });
-  });
-}
-
-export function addFreelancer(input: StoredFreelancer): Freelancer {
-  // Writes a freelancer operational/showcase shadow only. Not canonical user persistence.
-  return mutateStore((store) => {
-    store.freelancers.unshift(input);
-
-    return input.profile;
-  });
-}
-
-export function removeFreelancerShadow(input: { id?: string; email?: string }) {
-  const normalizedEmail = input.email?.trim().toLowerCase();
-
-  mutateStore((store) => {
-    store.freelancers = store.freelancers.filter((freelancer) => {
-      if (input.id && freelancer.profile.id === input.id) {
-        return false;
-      }
-
-      if (normalizedEmail && freelancer.email.toLowerCase() === normalizedEmail) {
-        return false;
-      }
-
-      return true;
-    });
   });
 }
 
@@ -840,6 +431,126 @@ export function addContact(input: ContactMessage): ContactMessage {
     }
 
     return normalizedContact;
+  });
+}
+
+function matchesConversationParty(
+  contact: ContactMessage,
+  input: {
+    freelancerId?: string;
+    freelancerEmail?: string;
+    clientId?: string;
+    clientEmail?: string;
+  },
+) {
+  const sameFreelancer =
+    (input.freelancerId && contact.freelancerId === input.freelancerId) ||
+    (input.freelancerEmail &&
+      contact.freelancerEmail?.toLowerCase() === input.freelancerEmail.toLowerCase());
+  const sameClient =
+    (input.clientId && contact.clientId === input.clientId) ||
+    (input.clientEmail && contact.clientEmail?.toLowerCase() === input.clientEmail.toLowerCase());
+
+  return Boolean(sameFreelancer && sameClient);
+}
+
+export function findConversationBetweenParties(input: {
+  freelancerId?: string;
+  freelancerEmail?: string;
+  clientId?: string;
+  clientEmail?: string;
+}): ContactMessage | undefined {
+  const store = readStore();
+  const contact = store.contacts.find((item) => matchesConversationParty(item, input));
+
+  return contact ? hydrateContact(store, contact) : undefined;
+}
+
+export function createOrContinueContact(input: Omit<ContactMessage, 'id' | 'createdAt' | 'messages'>): {
+  contact: ContactMessage;
+  created: boolean;
+} {
+  return mutateStore((store) => {
+    const currentIndex = store.contacts.findIndex((item) =>
+      matchesConversationParty(item, {
+        freelancerId: input.freelancerId,
+        freelancerEmail: input.freelancerEmail,
+        clientId: input.clientId,
+        clientEmail: input.clientEmail,
+      }),
+    );
+
+    if (currentIndex >= 0) {
+      const contact = store.contacts[currentIndex];
+      const createdAt = new Date().toISOString();
+      const nextMessage: ContactThreadMessage = {
+        id: `${contact.id}-message-${contact.messages.length + 1}`,
+        senderRole: 'client',
+        senderName: input.clientName,
+        body: input.message,
+        createdAt,
+      };
+
+      contact.freelancerId = input.freelancerId;
+      contact.freelancerName = input.freelancerName;
+      contact.freelancerEmail = input.freelancerEmail;
+      contact.clientId = input.clientId;
+      contact.clientName = input.clientName;
+      contact.clientLocation = input.clientLocation;
+      contact.clientEmail = input.clientEmail;
+      contact.clientPhone = input.clientPhone;
+      contact.subject = input.subject;
+      contact.message = input.message;
+      contact.channel = input.channel;
+      contact.status = 'Novo';
+      contact.messages.push(nextMessage);
+
+      const freelancer = findStoredFreelancerByContact(store, contact);
+      if (freelancer) {
+        freelancer.metrics.messagesReceived += 1;
+      }
+
+      if (currentIndex > 0) {
+        store.contacts.splice(currentIndex, 1);
+        store.contacts.unshift(contact);
+      }
+
+      return {
+        contact: hydrateContact(store, contact),
+        created: false,
+      };
+    }
+
+    const contactId = `contact-${Date.now()}`;
+    const createdAt = new Date().toISOString();
+    const contact: ContactMessage = {
+      id: contactId,
+      createdAt,
+      messages: [
+        {
+          id: `${contactId}-message-1`,
+          senderRole: 'client',
+          senderName: input.clientName,
+          body: input.message,
+          createdAt,
+        },
+      ],
+      ...input,
+    };
+
+    const normalizedContact = normalizeContactRecord(store, contact);
+    store.contacts.unshift(normalizedContact);
+
+    const freelancer = findStoredFreelancerByContact(store, normalizedContact);
+    if (freelancer) {
+      freelancer.metrics.contactClicks += 1;
+      freelancer.metrics.messagesReceived += 1;
+    }
+
+    return {
+      contact: normalizedContact,
+      created: true,
+    };
   });
 }
 
@@ -1025,8 +736,9 @@ export function getClientDashboard(id: string): ClientDashboard | undefined {
       .map((contact) => hydrateContact(store, contact)),
     notifications: [
       'Seu contato com Bruno Silva foi entregue com sucesso.',
-      'Novos freelancers verificados entraram na categoria Programação.',
+      'Novos profissionais verificados entraram em áreas de serviços e atendimento.',
       'Você pode favoritar profissionais para comparar propostas depois.',
     ],
   };
 }
+

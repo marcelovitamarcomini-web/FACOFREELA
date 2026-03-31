@@ -1,12 +1,16 @@
 node_modules/
 dist/
+deploy/
 .env
 .env.*
 !.env.example
+.env.local
 *.log
 coverage/
 .DS_Store
 Thumbs.db
 .vscode/
 codex-backups/
+.codex-*
+.codex-cdp-profile*/
 *.tsbuildinfo
