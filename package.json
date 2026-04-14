@@ -15,9 +15,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.11",
+    "@hono/node-server": "^1.19.13",
     "@supabase/supabase-js": "^2.99.2",
-    "hono": "^4.12.5",
+    "hono": "^4.12.12",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.1",
@@ -28,13 +28,13 @@
     "@types/node": "^25.4.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.4",
+    "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.27",
     "concurrently": "^9.2.1",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^8.0.8"
   }
 }

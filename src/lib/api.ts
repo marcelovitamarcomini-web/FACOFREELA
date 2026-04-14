@@ -1,6 +1,7 @@
 import type { User } from '@supabase/supabase-js';
 
 import type {
+  ApiEnvelope,
   AuthSessionPayload,
   ClientDashboard,
   ContactMessage,
@@ -8,11 +9,16 @@ import type {
   ConversationInbox,
   Freelancer,
   FreelancerDashboard,
+  FreelancerSubscriptionWorkspace,
+  PaymentCheckout,
+  PaymentCheckoutDecisionResponse,
+  PaymentCheckoutStartResponse,
   FreelancerPlanTier,
   ProfileAssetKind,
   ProfileAssetUploadResponse,
   RegistrationResponse,
   SessionUser,
+  SignupAvailabilityResponse,
   SubscriptionStatus,
   UserRole,
 } from '../../shared/contracts';
@@ -85,7 +91,6 @@ type FreelancerProfileRow = {
   linkedin_url?: string | null;
   website_url?: string | null;
   whatsapp?: string | null;
-  has_cnpj?: boolean | null;
   subscription_tier?: FreelancerPlanTier | null;
   subscription_status?: SubscriptionStatus | null;
   subscription_started_at?: string | null;
@@ -112,6 +117,13 @@ type ContactMessageRow = {
   created_at: string;
 };
 
+type ContactReadRow = {
+  contact_id: string;
+  user_id: string;
+  last_read_message_id: string | null;
+  last_read_at: string;
+};
+
 type AuthSeed = {
   avatarUrl?: string | null;
   bannerUrl?: string | null;
@@ -123,7 +135,6 @@ type AuthSeed = {
   email?: string | null;
   experienceLevel?: string | null;
   fullName?: string | null;
-  hasCnpj?: boolean | null;
   linkedinUrl?: string | null;
   name?: string | null;
   phone?: string | null;
@@ -178,6 +189,159 @@ function normalizeDigits(value?: string | null): string | undefined {
   return normalized ? normalized : undefined;
 }
 
+function isSignupAvailabilityEnvelope(
+  payload: unknown,
+): payload is ApiEnvelope<SignupAvailabilityResponse> {
+  if (typeof payload !== 'object' || !payload || !('data' in payload)) {
+    return false;
+  }
+
+  const data = (payload as { data?: unknown }).data;
+  return (
+    typeof data === 'object' &&
+    !!data &&
+    'emailExists' in data &&
+    'phoneExists' in data
+  );
+}
+
+function isRegistrationEnvelope(
+  payload: unknown,
+): payload is ApiEnvelope<RegistrationResponse> {
+  if (typeof payload !== 'object' || !payload || !('data' in payload)) {
+    return false;
+  }
+
+  const data = (payload as { data?: unknown }).data;
+  return (
+    typeof data === 'object' &&
+    !!data &&
+    'user' in data &&
+    'requiresEmailConfirmation' in data
+  );
+}
+
+function isPaymentCheckout(value: unknown): value is PaymentCheckout {
+  return (
+    typeof value === 'object' &&
+    !!value &&
+    'id' in value &&
+    'status' in value &&
+    'planTier' in value &&
+    'amountMonthly' in value
+  );
+}
+
+function isFreelancer(value: unknown): value is Freelancer {
+  return (
+    typeof value === 'object' &&
+    !!value &&
+    'id' in value &&
+    'slug' in value &&
+    'name' in value &&
+    'profession' in value
+  );
+}
+
+function isFreelancerEnvelope(payload: unknown): payload is ApiEnvelope<Freelancer> {
+  if (typeof payload !== 'object' || !payload || !('data' in payload)) {
+    return false;
+  }
+
+  return isFreelancer((payload as { data?: unknown }).data);
+}
+
+function isFreelancersEnvelope(payload: unknown): payload is ApiEnvelope<Freelancer[]> {
+  if (typeof payload !== 'object' || !payload || !('data' in payload)) {
+    return false;
+  }
+
+  const data = (payload as { data?: unknown }).data;
+  return Array.isArray(data) && data.every((item) => isFreelancer(item));
+}
+
+function isFreelancerSubscriptionWorkspace(
+  value: unknown,
+): value is FreelancerSubscriptionWorkspace {
+  if (typeof value !== 'object' || !value) {
+    return false;
+  }
+
+  const profile = (value as { profile?: unknown }).profile;
+  const subscription = (value as { subscription?: unknown }).subscription;
+  const activeCheckout = (value as { activeCheckout?: unknown }).activeCheckout;
+  const latestCheckout = (value as { latestCheckout?: unknown }).latestCheckout;
+
+  const hasProfile =
+    typeof profile === 'object' &&
+    !!profile &&
+    'name' in profile &&
+    'profession' in profile &&
+    'subscriptionTier' in profile;
+  const hasSubscription =
+    typeof subscription === 'object' &&
+    !!subscription &&
+    'tier' in subscription &&
+    'status' in subscription &&
+    'priceMonthly' in subscription;
+  const hasActiveCheckout =
+    activeCheckout === null || activeCheckout === undefined || isPaymentCheckout(activeCheckout);
+  const hasLatestCheckout =
+    latestCheckout === null || latestCheckout === undefined || isPaymentCheckout(latestCheckout);
+
+  return hasProfile && hasSubscription && hasActiveCheckout && hasLatestCheckout;
+}
+
+function isPaymentCheckoutStartEnvelope(
+  payload: unknown,
+): payload is ApiEnvelope<PaymentCheckoutStartResponse> {
+  if (typeof payload !== 'object' || !payload || !('data' in payload)) {
+    return false;
+  }
+
+  const data = (payload as { data?: unknown }).data;
+  return (
+    typeof data === 'object' &&
+    !!data &&
+    'checkout' in data &&
+    'checkoutPath' in data &&
+    isPaymentCheckout((data as { checkout?: unknown }).checkout)
+  );
+}
+
+function isPaymentCheckoutDecisionEnvelope(
+  payload: unknown,
+): payload is ApiEnvelope<PaymentCheckoutDecisionResponse> {
+  if (typeof payload !== 'object' || !payload || !('data' in payload)) {
+    return false;
+  }
+
+  const data = (payload as { data?: unknown }).data;
+  return (
+    typeof data === 'object' &&
+    !!data &&
+    'checkout' in data &&
+    'redirectPath' in data &&
+    isPaymentCheckout((data as { checkout?: unknown }).checkout)
+  );
+}
+
+function isPaymentCheckoutEnvelope(
+  payload: unknown,
+): payload is ApiEnvelope<{ checkout: PaymentCheckout }> {
+  if (typeof payload !== 'object' || !payload || !('data' in payload)) {
+    return false;
+  }
+
+  const data = (payload as { data?: unknown }).data;
+  return (
+    typeof data === 'object' &&
+    !!data &&
+    'checkout' in data &&
+    isPaymentCheckout((data as { checkout?: unknown }).checkout)
+  );
+}
+
 function normalizeFreelancerBannerUrl(value?: string | null): string | undefined {
   const normalized = normalizeText(value);
   if (!normalized || legacyFreelancerBannerUrls.has(normalized)) {
@@ -192,29 +356,6 @@ function readMetadataValue(metadata: Record<string, unknown>, keys: string[]): s
     const value = metadata[key];
     if (typeof value === 'string' && value.trim()) {
       return value.trim();
-    }
-  }
-
-  return null;
-}
-
-function readMetadataBoolean(metadata: Record<string, unknown>, keys: string[]): boolean | null {
-  for (const key of keys) {
-    const value = metadata[key];
-
-    if (typeof value === 'boolean') {
-      return value;
-    }
-
-    if (typeof value === 'string') {
-      const normalized = value.trim().toLowerCase();
-      if (normalized === 'true' || normalized === 'sim') {
-        return true;
-      }
-
-      if (normalized === 'false' || normalized === 'nao' || normalized === 'não') {
-        return false;
-      }
     }
   }
 
@@ -266,7 +407,6 @@ function readAuthSeed(user: User): AuthSeed {
     email: normalizeEmail(readMetadataValue(metadata, ['email']) ?? user.email ?? null) ?? null,
     experienceLevel: readMetadataValue(metadata, ['experience_level', 'experienceLevel']),
     fullName: readMetadataValue(metadata, ['full_name']),
-    hasCnpj: readMetadataBoolean(metadata, ['has_cnpj', 'hasCnpj']),
     linkedinUrl: readMetadataValue(metadata, ['linkedin_url', 'linkedinUrl']),
     name: readMetadataValue(metadata, ['name']),
     phone: readMetadataValue(metadata, ['phone']),
@@ -352,7 +492,13 @@ function normalizeSubscriptionTier(value?: string | null): FreelancerPlanTier {
 }
 
 function normalizeSubscriptionStatus(value?: string | null): SubscriptionStatus {
-  return value === 'past_due' || value === 'expired' || value === 'active' ? value : 'active';
+  return value === 'pending' ||
+    value === 'past_due' ||
+    value === 'expired' ||
+    value === 'canceled' ||
+    value === 'active'
+    ? value
+    : 'active';
 }
 
 function buildDisplayName(profile?: ProfileRow | null) {
@@ -508,12 +654,12 @@ function buildFreelancer(profile: ProfileRow, freelancerRow?: FreelancerProfileR
     summary:
       normalizeText(freelancerRow?.summary) ??
       normalizeText(profile.bio) ??
-      'Perfil profissional em configura??o.',
+      'Perfil profissional em configuração.',
     description:
       normalizeText(freelancerRow?.description) ??
       normalizeText(freelancerRow?.summary) ??
       normalizeText(profile.bio) ??
-      'O perfil ainda est? sendo completado com mais detalhes de atua??o.',
+      'O perfil ainda está sendo completado com mais detalhes de atuação.',
     location: buildLocation(freelancerRow?.city ?? profile.city, freelancerRow?.state ?? profile.state),
     experienceLevel,
     yearsExperience:
@@ -558,7 +704,7 @@ function buildClientProfile(profile: ProfileRow) {
 function buildSessionUser(profile: ProfileRow): SessionUser {
   const role = normalizeUserRole(profile);
   if (!role) {
-    throw new Error('N?o foi poss?vel identificar o tipo da sua conta.');
+    throw new Error('Não foi possível identificar o tipo da sua conta.');
   }
 
   return {
@@ -570,12 +716,11 @@ function buildSessionUser(profile: ProfileRow): SessionUser {
 
 function buildFreelancerSubscription(freelancerRow?: FreelancerProfileRow | null) {
   const tier = normalizeSubscriptionTier(freelancerRow?.subscription_tier);
-  const hasCnpj = freelancerRow?.has_cnpj === true;
 
   return {
     tier,
     name: freelancerPlanCatalog[tier].name,
-    priceMonthly: getFreelancerPlanPrice(tier, hasCnpj),
+    priceMonthly: getFreelancerPlanPrice(tier),
     status: normalizeSubscriptionStatus(freelancerRow?.subscription_status),
     startedAt: freelancerRow?.subscription_started_at ?? new Date().toISOString(),
     endsAt:
@@ -609,7 +754,7 @@ function normalizeErrorMessage(message: string, fallback: string) {
   }
 
   if (normalized.includes('auth session missing')) {
-    return 'Fa?a login para continuar.';
+    return 'Faça login para continuar.';
   }
 
   if (
@@ -617,7 +762,7 @@ function normalizeErrorMessage(message: string, fallback: string) {
     normalized.includes('invalid email or password') ||
     normalized.includes('email or password')
   ) {
-    return 'E-mail ou senha inv?lidos.';
+    return 'E-mail ou senha inválidos.';
   }
 
   if (normalized.includes('email not confirmed')) {
@@ -629,7 +774,34 @@ function normalizeErrorMessage(message: string, fallback: string) {
     normalized.includes('already been registered') ||
     normalized.includes('user already exists')
   ) {
-    return 'J? existe uma conta com este e-mail.';
+    return 'Já existe uma conta com este e-mail.';
+  }
+
+  if (normalized.includes('profiles_email_key') || normalized.includes('email_key')) {
+    return 'J\u00e1 existe uma conta com este e-mail.';
+  }
+
+  if (
+    normalized.includes('profiles_phone_normalized_key') ||
+    normalized.includes('auth_users_phone_normalized_key')
+  ) {
+    return 'J\u00e1 existe uma conta com este telefone.';
+  }
+
+  if (normalized.includes('conta com este e-mail')) {
+    return 'J\u00e1 existe uma conta com este e-mail.';
+  }
+
+  if (normalized.includes('este e-mail') && normalized.includes('conta')) {
+    return 'J\u00e1 existe uma conta com este e-mail.';
+  }
+
+  if (normalized.includes('conta com este telefone')) {
+    return 'J\u00e1 existe uma conta com este telefone.';
+  }
+
+  if (normalized.includes('este telefone') && normalized.includes('conta')) {
+    return 'J\u00e1 existe uma conta com este telefone.';
   }
 
   return message;
@@ -648,6 +820,421 @@ function toError(error: unknown, fallback: string) {
   return new Error(normalizeErrorMessage(maybeMessage, fallback));
 }
 
+async function callRpc<T>(
+  fn: string,
+  args: Record<string, unknown> | undefined,
+  fallback: string,
+): Promise<T> {
+  const { data, error } = await supabase.rpc(fn, args ?? {});
+
+  if (error) {
+    throw toError(error, fallback);
+  }
+
+  return data as T;
+}
+
+async function checkSignupAvailabilityViaServer(
+  email: string,
+  phone: string,
+): Promise<SignupAvailabilityResponse | null> {
+  try {
+    const response = await fetch('/api/auth/signup-availability', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ email, phone }),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json().catch(() => null)) as unknown;
+    if (!isSignupAvailabilityEnvelope(payload)) {
+      return null;
+    }
+
+    return payload.data;
+  } catch {
+    return null;
+  }
+}
+
+async function checkSignupAvailability(input: {
+  email: string;
+  phone: string;
+}): Promise<SignupAvailabilityResponse> {
+  const normalizedPhone = normalizeDigits(input.phone);
+  const normalizedEmail = normalizeEmail(input.email);
+  if (!normalizedEmail) {
+    return {
+      emailExists: false,
+      phoneExists: false,
+    };
+  }
+
+  if (!normalizedPhone) {
+    return {
+      emailExists: false,
+      phoneExists: false,
+    };
+  }
+
+  const serverResult = await checkSignupAvailabilityViaServer(normalizedEmail, input.phone);
+  if (serverResult !== null) {
+    return serverResult;
+  }
+
+  return {
+    emailExists: false,
+    phoneExists: false,
+  };
+}
+
+async function assertSignupIdentifiersAvailable(input: {
+  email: string;
+  phone: string;
+}) {
+  const conflicts = await checkSignupAvailability(input);
+
+  if (conflicts.emailExists) {
+    throw new Error('Já existe uma conta com este e-mail. Faça login para continuar.');
+  }
+
+  if (conflicts.phoneExists) {
+    throw new Error('Já existe uma conta com este telefone.');
+  }
+}
+
+async function assertAnonymousSignup() {
+  const authUser = await selectAuthenticatedUser();
+  if (authUser) {
+    throw new Error('Você já está em uma conta ativa. Faça logout antes de criar outro cadastro.');
+  }
+}
+
+function isObfuscatedExistingSignupUser(user: User | null | undefined, expectedEmail: string) {
+  if (!user) {
+    return false;
+  }
+
+  const normalizedUserEmail = normalizeEmail(user.email);
+  const normalizedExpectedEmail = normalizeEmail(expectedEmail);
+  const providers = Array.isArray(user.app_metadata?.providers)
+    ? user.app_metadata.providers.filter((value): value is string => typeof value === 'string')
+    : [];
+  const provider =
+    typeof user.app_metadata?.provider === 'string' ? user.app_metadata.provider : undefined;
+  const identityCount = Array.isArray(user.identities) ? user.identities.length : 0;
+
+  return (
+    normalizedUserEmail !== normalizedExpectedEmail ||
+    (identityCount === 0 && provider !== 'email' && !providers.includes('email'))
+  );
+}
+
+async function registerViaServer(
+  path: string,
+  payload: unknown,
+  fallbackMessage: string,
+): Promise<RegistrationResponse | null> {
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+
+    if (response.status === 404) {
+      return null;
+    }
+
+    const responsePayload = (await response.json().catch(() => null)) as unknown;
+    if (!response.ok) {
+      const message =
+        typeof responsePayload === 'object' && responsePayload && 'message' in responsePayload
+          ? String((responsePayload as { message?: unknown }).message ?? '')
+          : fallbackMessage;
+      throw new Error(normalizeErrorMessage(message, fallbackMessage));
+    }
+
+    if (!isRegistrationEnvelope(responsePayload)) {
+      return null;
+    }
+
+    return responsePayload.data;
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return null;
+    }
+
+    throw toError(error, fallbackMessage);
+  }
+}
+
+async function registerViaSupabase(input: {
+  email: string;
+  password: string;
+  metadata: Record<string, unknown>;
+  fallbackMessage: string;
+}): Promise<RegistrationResponse> {
+  const { data, error } = await supabase.auth.signUp({
+    email: input.email,
+    password: input.password,
+    options: {
+      data: input.metadata,
+    },
+  });
+
+  if (error) {
+    throw toError(error, input.fallbackMessage);
+  }
+
+  if (isObfuscatedExistingSignupUser(data.user, input.email) && !data.session) {
+    throw new Error('Já existe uma conta com este e-mail. Faça login para continuar.');
+  }
+
+  if (data.user && data.session) {
+    const user = await materializeAuthUser(data.user);
+    return {
+      user,
+      requiresEmailConfirmation: false,
+    } satisfies RegistrationResponse;
+  }
+
+  return {
+    user: null,
+    requiresEmailConfirmation: true,
+  } satisfies RegistrationResponse;
+}
+
+async function startFreelancerCheckoutViaServer(
+  payload: unknown,
+): Promise<PaymentCheckoutStartResponse> {
+  const response = await fetch('/api/payments/freelancer-checkout', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  });
+
+  const responsePayload = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const message =
+      typeof responsePayload === 'object' && responsePayload && 'message' in responsePayload
+        ? String((responsePayload as { message?: unknown }).message ?? '')
+        : 'Não foi possível iniciar o checkout.';
+    throw new Error(normalizeErrorMessage(message, 'Não foi possível iniciar o checkout.'));
+  }
+
+  if (!isPaymentCheckoutStartEnvelope(responsePayload)) {
+    throw new Error('Não foi possível validar a sessão de checkout.');
+  }
+
+  return responsePayload.data;
+}
+
+async function getPaymentCheckoutViaServer(checkoutId: string): Promise<{ checkout: PaymentCheckout }> {
+  const response = await fetch(`/api/payments/checkout/${encodeURIComponent(checkoutId)}`, {
+    headers: {
+      Accept: 'application/json',
+    },
+    credentials: 'include',
+  });
+
+  const responsePayload = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const message =
+      typeof responsePayload === 'object' && responsePayload && 'message' in responsePayload
+        ? String((responsePayload as { message?: unknown }).message ?? '')
+        : 'Não foi possível carregar o checkout.';
+    throw new Error(normalizeErrorMessage(message, 'Não foi possível carregar o checkout.'));
+  }
+
+  if (!isPaymentCheckoutEnvelope(responsePayload)) {
+    throw new Error('Não foi possível validar o checkout.');
+  }
+
+  return responsePayload.data;
+}
+
+async function completeFreelancerMockCheckoutViaServer(
+  checkoutId: string,
+  outcome: 'approved' | 'pending' | 'failed',
+): Promise<PaymentCheckoutDecisionResponse> {
+  const response = await fetch(`/api/payments/checkout/${encodeURIComponent(checkoutId)}/mock-complete`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify({ outcome }),
+  });
+
+  const responsePayload = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const message =
+      typeof responsePayload === 'object' && responsePayload && 'message' in responsePayload
+        ? String((responsePayload as { message?: unknown }).message ?? '')
+        : 'Não foi possível concluir o checkout.';
+    throw new Error(normalizeErrorMessage(message, 'Não foi possível concluir o checkout.'));
+  }
+
+  if (!isPaymentCheckoutDecisionEnvelope(responsePayload)) {
+    throw new Error('Não foi possível validar o retorno do checkout.');
+  }
+
+  return responsePayload.data;
+}
+
+async function retryFreelancerCheckoutViaServer(): Promise<PaymentCheckoutStartResponse> {
+  const response = await fetch('/api/payments/freelancer-checkout/retry', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+    },
+    credentials: 'include',
+  });
+
+  const responsePayload = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const message =
+      typeof responsePayload === 'object' && responsePayload && 'message' in responsePayload
+        ? String((responsePayload as { message?: unknown }).message ?? '')
+        : 'Não foi possível gerar um novo checkout.';
+    throw new Error(normalizeErrorMessage(message, 'Não foi possível gerar um novo checkout.'));
+  }
+
+  if (!isPaymentCheckoutStartEnvelope(responsePayload)) {
+    throw new Error('Não foi possível validar a nova sessão de checkout.');
+  }
+
+  return responsePayload.data;
+}
+
+async function getFreelancerSubscriptionWorkspaceViaSupabase(): Promise<FreelancerSubscriptionWorkspace> {
+  const data = await callRpc<unknown>(
+    'get_freelancer_subscription_workspace',
+    undefined,
+    'Não foi possível carregar sua assinatura.',
+  );
+
+  if (!isFreelancerSubscriptionWorkspace(data)) {
+    throw new Error('Não foi possível validar os dados da assinatura.');
+  }
+
+  return data;
+}
+
+async function startFreelancerSubscriptionCheckoutViaSupabase(input: {
+  cnpjActive: boolean;
+  planTier: FreelancerPlanTier;
+  source?: 'subscription_page' | 'dashboard' | 'retry';
+}): Promise<PaymentCheckoutStartResponse> {
+  const data = await callRpc<unknown>(
+    'start_own_freelancer_subscription_checkout',
+    {
+      target_plan_tier: input.planTier,
+      cnpj_active: input.cnpjActive,
+      source: input.source ?? 'subscription_page',
+    },
+    'Não foi possível iniciar o checkout.',
+  );
+
+  if (
+    typeof data !== 'object' ||
+    !data ||
+    !('checkout' in data) ||
+    !('checkoutPath' in data) ||
+    !isPaymentCheckout((data as { checkout?: unknown }).checkout)
+  ) {
+    throw new Error('Não foi possível validar a nova sessão de checkout.');
+  }
+
+  return data as PaymentCheckoutStartResponse;
+}
+
+async function getPaymentCheckoutViaSupabase(checkoutId: string): Promise<{ checkout: PaymentCheckout }> {
+  const data = await callRpc<unknown>(
+    'get_own_payment_checkout_session',
+    {
+      target_checkout_id: checkoutId,
+    },
+    'Não foi possível carregar o checkout.',
+  );
+
+  if (
+    typeof data !== 'object' ||
+    !data ||
+    !('checkout' in data) ||
+    !isPaymentCheckout((data as { checkout?: unknown }).checkout)
+  ) {
+    throw new Error('Não foi possível validar o checkout.');
+  }
+
+  return data as { checkout: PaymentCheckout };
+}
+
+async function completeFreelancerMockCheckoutViaSupabase(
+  checkoutId: string,
+  outcome: 'approved' | 'pending' | 'failed',
+): Promise<PaymentCheckoutDecisionResponse> {
+  const data = await callRpc<unknown>(
+    'complete_own_mock_payment_checkout',
+    {
+      target_checkout_id: checkoutId,
+      outcome,
+    },
+    'Não foi possível concluir o checkout.',
+  );
+
+  if (
+    typeof data !== 'object' ||
+    !data ||
+    !('checkout' in data) ||
+    !('redirectPath' in data) ||
+    !isPaymentCheckout((data as { checkout?: unknown }).checkout)
+  ) {
+    throw new Error('Não foi possível validar o retorno do checkout.');
+  }
+
+  return data as PaymentCheckoutDecisionResponse;
+}
+
+type FreelancerRegistrationPayload = {
+  avatarUrl?: string;
+  bannerUrl?: string;
+  category: string;
+  cep: string;
+  confirmPassword: string;
+  description: string;
+  email: string;
+  experienceLevel: string;
+  linkedinUrl?: string;
+  location: string;
+  name: string;
+  password: string;
+  phone: string;
+  portfolioUrl?: string;
+  profession: string;
+  subscriptionTier: FreelancerPlanTier;
+  summary: string;
+  websiteUrl?: string;
+  yearsExperience: number;
+};
+
 async function unwrap<T>(
   promise: PromiseLike<{ data: T; error: { message: string } | null }>,
   fallback: string,
@@ -665,7 +1252,7 @@ async function selectProfileById(id: string): Promise<ProfileRow | null> {
   const { data, error } = await supabase.from('profiles').select('*').eq('id', id).maybeSingle();
 
   if (error) {
-    throw toError(error, 'N?o foi poss?vel carregar o perfil.');
+    throw toError(error, 'Não foi possível carregar o perfil.');
   }
 
   return (data as ProfileRow | null) ?? null;
@@ -679,7 +1266,7 @@ async function selectProfilesByIds(ids: string[]): Promise<ProfileRow[]> {
   const { data, error } = await supabase.from('profiles').select('*').in('id', ids);
 
   if (error) {
-    throw toError(error, 'N?o foi poss?vel carregar os perfis relacionados.');
+    throw toError(error, 'Não foi possível carregar os perfis relacionados.');
   }
 
   return (data ?? []) as ProfileRow[];
@@ -693,7 +1280,7 @@ async function selectClientProfileByUserId(userId: string): Promise<ClientProfil
     .maybeSingle();
 
   if (error) {
-    throw toError(error, 'N?o foi poss?vel carregar a conta de cliente.');
+    throw toError(error, 'Não foi possível carregar a conta de cliente.');
   }
 
   return (data as ClientProfileRow | null) ?? null;
@@ -709,7 +1296,7 @@ async function selectFreelancerProfileByUserId(
     .maybeSingle();
 
   if (error) {
-    throw toError(error, 'N?o foi poss?vel carregar a conta freelancer.');
+    throw toError(error, 'Não foi possível carregar a conta freelancer.');
   }
 
   return (data as FreelancerProfileRow | null) ?? null;
@@ -718,7 +1305,7 @@ async function selectFreelancerProfileByUserId(
 async function selectAuthenticatedUser(): Promise<User | null> {
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError) {
-    throw toError(sessionError, 'N?o foi poss?vel validar sua sess?o.');
+    throw toError(sessionError, 'Não foi possível validar sua sessão.');
   }
 
   if (!sessionData.session) {
@@ -727,7 +1314,7 @@ async function selectAuthenticatedUser(): Promise<User | null> {
 
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError) {
-    throw toError(userError, 'N?o foi poss?vel validar sua sess?o.');
+    throw toError(userError, 'Não foi possível validar sua sessão.');
   }
 
   return userData.user ?? null;
@@ -738,10 +1325,10 @@ async function materializeAuthUser(user: User): Promise<SessionUser> {
   const currentClientProfile = await selectClientProfileByUserId(user.id).catch(() => null);
   const currentFreelancerProfile = await selectFreelancerProfileByUserId(user.id).catch(() => null);
   const seed = readAuthSeed(user);
-  const role = seed.role ?? normalizeUserRole(currentProfile) ?? null;
+  const role = normalizeUserRole(currentProfile) ?? seed.role ?? null;
 
   if (!role) {
-    throw new Error('N?o foi poss?vel identificar o tipo da sua conta.');
+    throw new Error('Não foi possível identificar o tipo da sua conta.');
   }
 
   const fullName =
@@ -749,7 +1336,7 @@ async function materializeAuthUser(user: User): Promise<SessionUser> {
     normalizeText(seed.fullName) ??
     normalizeText(seed.name) ??
     user.email ??
-    'Usuario';
+    'Usuário';
   const phone = normalizeText(currentProfile?.phone) ?? normalizeText(seed.phone);
   const avatarUrl = normalizeText(currentProfile?.avatar_url) ?? normalizeText(seed.avatarUrl);
   const bio =
@@ -781,7 +1368,7 @@ async function materializeAuthUser(user: User): Promise<SessionUser> {
 
   await unwrap(
     supabase.from('profiles').upsert(profilePayload, { onConflict: 'id' }),
-    'N?o foi poss?vel sincronizar o perfil principal.',
+    'Não foi possível sincronizar o perfil principal.',
   );
 
   if (role === 'client') {
@@ -794,12 +1381,12 @@ async function materializeAuthUser(user: User): Promise<SessionUser> {
         },
         { onConflict: 'user_id' },
       ),
-      'N?o foi poss?vel sincronizar a conta de cliente.',
+      'Não foi possível sincronizar a conta de cliente.',
     );
 
     const nextProfile = await selectProfileById(user.id);
     if (!nextProfile) {
-      throw new Error('N?o foi poss?vel carregar sua conta ap?s a sincroniza??o.');
+      throw new Error('Não foi possível carregar sua conta após a sincronização.');
     }
 
     return buildSessionUser(nextProfile);
@@ -821,7 +1408,7 @@ async function materializeAuthUser(user: User): Promise<SessionUser> {
     normalizeText(currentFreelancerProfile?.summary) ??
     normalizeText(seed.summary) ??
     normalizeText(seed.bio) ??
-    'Perfil profissional em configura??o.';
+    'Perfil profissional em configuração.';
   const description =
     normalizeText(currentFreelancerProfile?.description) ??
     normalizeText(seed.description) ??
@@ -869,7 +1456,6 @@ async function materializeAuthUser(user: User): Promise<SessionUser> {
       normalizeText(currentFreelancerProfile?.whatsapp) ??
       normalizeText(seed.whatsapp) ??
       normalizeDigits(phone),
-    has_cnpj: currentFreelancerProfile?.has_cnpj ?? seed.hasCnpj ?? false,
     subscription_tier:
       currentFreelancerProfile?.subscription_tier ?? seed.subscriptionTier ?? 'normal',
     subscription_status: currentFreelancerProfile?.subscription_status ?? 'active',
@@ -898,12 +1484,12 @@ async function materializeAuthUser(user: User): Promise<SessionUser> {
 
   await unwrap(
     supabase.from('freelancer_profiles').upsert(freelancerPayload, { onConflict: 'user_id' }),
-    'N?o foi poss?vel sincronizar a conta freelancer.',
+    'Não foi possível sincronizar a conta freelancer.',
   );
 
   const nextProfile = await selectProfileById(user.id);
   if (!nextProfile) {
-    throw new Error('N?o foi poss?vel carregar sua conta ap?s a sincroniza??o.');
+    throw new Error('Não foi possível carregar sua conta após a sincronização.');
   }
 
   return buildSessionUser(nextProfile);
@@ -912,66 +1498,90 @@ async function materializeAuthUser(user: User): Promise<SessionUser> {
 async function requireSessionUser(role?: UserRole): Promise<SessionUser> {
   const authUser = await selectAuthenticatedUser();
   if (!authUser) {
-    throw new Error('Fa?a login para continuar.');
+    throw new Error('Faça login para continuar.');
   }
 
   const sessionUser = await materializeAuthUser(authUser);
   if (role && sessionUser.role !== role) {
     throw new Error(
       role === 'client'
-        ? 'Apenas clientes podem acessar esta ?rea.'
-        : 'Apenas freelancers podem acessar esta ?rea.',
+        ? 'Apenas clientes podem acessar esta área.'
+        : 'Apenas freelancers podem acessar esta área.',
     );
   }
 
   return sessionUser;
 }
 
-async function listPublicFreelancers(init?: RequestInit): Promise<Freelancer[]> {
-  let profileQuery = supabase.from('profiles').select('*').eq('user_type', 'freelancer');
-  if (init?.signal) {
-    profileQuery = profileQuery.abortSignal(init.signal);
+
+async function listPublicFreelancers(
+  filters?: SearchFilters,
+  init?: RequestInit,
+): Promise<Freelancer[]> {
+  const searchParams = new URLSearchParams();
+
+  if (filters?.search?.trim()) {
+    searchParams.set('search', filters.search.trim());
   }
 
-  const profiles = (await unwrap(
-    profileQuery,
-    'N?o foi poss?vel carregar os profissionais.',
-  )) as ProfileRow[];
-
-  if (profiles.length === 0) {
-    return [];
+  if (filters?.category?.trim()) {
+    searchParams.set('category', filters.category.trim());
   }
 
-  let freelancerQuery = supabase
-    .from('freelancer_profiles')
-    .select('*')
-    .in('user_id', profiles.map((profile) => profile.id));
-  if (init?.signal) {
-    freelancerQuery = freelancerQuery.abortSignal(init.signal);
+  if (filters?.location?.trim()) {
+    searchParams.set('location', filters.location.trim());
   }
 
-  const freelancerRows = (await unwrap(
-    freelancerQuery,
-    'N?o foi poss?vel carregar os detalhes dos profissionais.',
-  )) as FreelancerProfileRow[];
-  const freelancerMap = new Map(freelancerRows.map((row) => [row.user_id, row]));
+  if (filters?.experience?.trim()) {
+    searchParams.set('experience', filters.experience.trim());
+  }
 
-  return profiles
-    .map((profile) => buildFreelancer(profile, freelancerMap.get(profile.id) ?? null))
-    .filter((freelancer) => {
-      const row = freelancerMap.get(freelancer.id);
-      return normalizeSubscriptionStatus(row?.subscription_status) === 'active';
-    })
-    .sort((left, right) => {
-      const leftRank = left.subscriptionTier === 'booster' ? 0 : 1;
-      const rightRank = right.subscriptionTier === 'booster' ? 0 : 1;
+  const queryString = searchParams.toString();
+  const response = await fetch(`/api/freelancers${queryString ? `?${queryString}` : ''}`, {
+    headers: {
+      Accept: 'application/json',
+    },
+    signal: init?.signal,
+  });
 
-      if (leftRank !== rightRank) {
-        return leftRank - rightRank;
-      }
+  const responsePayload = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const message =
+      typeof responsePayload === 'object' && responsePayload && 'message' in responsePayload
+        ? String((responsePayload as { message?: unknown }).message ?? '')
+        : 'Nao foi possivel carregar os profissionais.';
+    throw new Error(normalizeErrorMessage(message, 'Nao foi possivel carregar os profissionais.'));
+  }
 
-      return left.name.localeCompare(right.name, 'pt-BR');
-    });
+  if (!isFreelancersEnvelope(responsePayload)) {
+    throw new Error('Nao foi possivel validar os profissionais retornados.');
+  }
+
+  return responsePayload.data;
+}
+
+async function fetchPublicFreelancerBySlug(slug: string, init?: RequestInit): Promise<Freelancer> {
+  const response = await fetch(`/api/freelancers/${encodeURIComponent(slug)}`, {
+    headers: {
+      Accept: 'application/json',
+    },
+    signal: init?.signal,
+  });
+
+  const responsePayload = (await response.json().catch(() => null)) as unknown;
+  if (!response.ok) {
+    const message =
+      typeof responsePayload === 'object' && responsePayload && 'message' in responsePayload
+        ? String((responsePayload as { message?: unknown }).message ?? '')
+        : 'Freelancer nao encontrado.';
+    throw new Error(normalizeErrorMessage(message, 'Freelancer nao encontrado.'));
+  }
+
+  if (!isFreelancerEnvelope(responsePayload)) {
+    throw new Error('Nao foi possivel validar o perfil do freelancer.');
+  }
+
+  return responsePayload.data;
 }
 
 async function hydrateContacts(contactRows: ContactRow[]): Promise<ContactMessage[]> {
@@ -992,7 +1602,7 @@ async function hydrateContacts(contactRows: ContactRow[]): Promise<ContactMessag
         .select('*')
         .in('contact_id', contactIds)
         .order('created_at', { ascending: true }),
-      'N?o foi poss?vel carregar as mensagens.',
+      'Não foi possível carregar as mensagens.',
     ) as Promise<ContactMessageRow[]>,
     selectProfilesByIds(participantIds),
   ]);
@@ -1049,16 +1659,16 @@ async function loadContactById(contactId: string): Promise<ContactMessage> {
     .maybeSingle();
 
   if (error) {
-    throw toError(error, 'N?o foi poss?vel carregar a conversa.');
+    throw toError(error, 'Não foi possível carregar a conversa.');
   }
 
   if (!data) {
-    throw new Error('Conversa n?o encontrada.');
+    throw new Error('Conversa não encontrada.');
   }
 
   const [contact] = await hydrateContacts([data as ContactRow]);
   if (!contact) {
-    throw new Error('Conversa n?o encontrada.');
+    throw new Error('Conversa não encontrada.');
   }
 
   return contact;
@@ -1071,54 +1681,51 @@ async function loadContactsForUser(userId: string): Promise<ContactMessage[]> {
       .select('*')
       .or(`client_user_id.eq.${userId},freelancer_user_id.eq.${userId}`)
       .order('updated_at', { ascending: false }),
-    'N?o foi poss?vel carregar sua central de mensagens.',
+    'Não foi possível carregar sua central de mensagens.',
   )) as ContactRow[];
 
   return hydrateContacts(rows);
 }
 
+async function loadSeenMessageIds(
+  userId: string,
+  contactIds: string[],
+): Promise<Record<string, string>> {
+  if (contactIds.length === 0) {
+    return {};
+  }
+
+  const rows = (await unwrap(
+    supabase
+      .from('contact_reads')
+      .select('contact_id,user_id,last_read_message_id,last_read_at')
+      .eq('user_id', userId)
+      .in('contact_id', contactIds),
+    'Nao foi possivel carregar o estado de leitura das conversas.',
+  )) as ContactReadRow[];
+
+  return rows.reduce<Record<string, string>>((accumulator, row) => {
+    if (row.last_read_message_id) {
+      accumulator[row.contact_id] = row.last_read_message_id;
+    }
+
+    return accumulator;
+  }, {});
+}
+
 export const api = {
+
   async getFreelancers(filters: SearchFilters, init?: RequestInit) {
-    const freelancers = await listPublicFreelancers(init);
-    const normalizedSearch = filters.search?.trim().toLowerCase() ?? '';
-    const normalizedLocation = filters.location?.trim().toLowerCase() ?? '';
-
-    return freelancers.filter((freelancer) => {
-      const matchesSearch =
-        !normalizedSearch ||
-        freelancer.name.toLowerCase().includes(normalizedSearch) ||
-        freelancer.profession.toLowerCase().includes(normalizedSearch) ||
-        freelancer.skills.some((skill) => skill.toLowerCase().includes(normalizedSearch));
-      const matchesCategory =
-        !filters.category || filters.category === 'Todos' || freelancer.category === filters.category;
-      const matchesLocation =
-        !normalizedLocation || freelancer.location.toLowerCase().includes(normalizedLocation);
-      const matchesExperience =
-        !filters.experience ||
-        filters.experience === 'Todos' ||
-        freelancer.experienceLevel === filters.experience;
-
-      return matchesSearch && matchesCategory && matchesLocation && matchesExperience;
-    });
+    return listPublicFreelancers(filters, init);
   },
 
   async getFreelancer(slug: string, init?: RequestInit) {
-    const freelancers = await listPublicFreelancers(init);
-    const freelancer = freelancers.find((item) => item.slug === slug);
-
-    if (!freelancer) {
-      throw new Error('Freelancer n?o encontrado.');
-    }
-
-    void supabase.rpc('increment_freelancer_profile_views', {
-      target_user_id: freelancer.id,
-    });
-
-    return freelancer;
+    return fetchPublicFreelancerBySlug(slug, init);
   },
 
   async registerClient(payload: {
     cep: string;
+    confirmPassword: string;
     email: string;
     location: string;
     name: string;
@@ -1126,122 +1733,173 @@ export const api = {
     phone: string;
   }) {
     const normalizedCep = sanitizeCep(payload.cep);
+    const normalizedEmail = normalizeEmail(payload.email);
+    await assertAnonymousSignup();
     if (normalizedCep.length !== 8) {
       throw new Error('Informe um CEP válido com 8 dígitos.');
     }
 
-    const [city, state] = payload.location.split(',').map((part) => part?.trim() ?? '');
-    const { data, error } = await supabase.auth.signUp({
-      email: payload.email.trim().toLowerCase(),
-      password: payload.password,
-      options: {
-        data: {
-          cep: normalizedCep,
-          city,
-          email: payload.email.trim().toLowerCase(),
-          full_name: payload.name,
-          name: payload.name,
-          phone: payload.phone,
-          role: 'client',
-          state,
-          user_type: 'client',
-        },
-      },
+    if (!normalizedEmail) {
+      throw new Error('Informe um e-mail válido.');
+    }
+
+    await assertSignupIdentifiersAvailable({
+      email: normalizedEmail,
+      phone: payload.phone,
     });
 
-    if (error) {
-      throw toError(error, 'N?o foi poss?vel criar a conta.');
+    const [city, state] = payload.location.split(',').map((part) => part?.trim() ?? '');
+    const serverRegistration = await registerViaServer(
+      '/api/auth/register/client',
+      payload,
+      'Não foi possível criar a conta.',
+    );
+    if (serverRegistration) {
+      return serverRegistration;
     }
 
-    if (data.user && data.session) {
-      const user = await materializeAuthUser(data.user);
-      return {
-        user,
-        requiresEmailConfirmation: false,
-      } satisfies RegistrationResponse;
-    }
-
-    return {
-      user: null,
-      requiresEmailConfirmation: true,
-    } satisfies RegistrationResponse;
+    return registerViaSupabase({
+      email: normalizedEmail,
+      password: payload.password,
+      fallbackMessage: 'Não foi possível criar a conta.',
+      metadata: {
+        cep: normalizedCep,
+        city,
+        email: normalizedEmail,
+        full_name: payload.name,
+        name: payload.name,
+        phone: payload.phone,
+        role: 'client',
+        state,
+        user_type: 'client',
+      },
+    });
   },
 
-  async registerFreelancer(payload: {
-    avatarUrl?: string;
-    bannerUrl?: string;
-    category: string;
-    cep: string;
-    description: string;
-    email: string;
-    experienceLevel: string;
-    hasCnpj: string;
-    linkedinUrl?: string;
-    location: string;
-    name: string;
-    password: string;
-    phone: string;
-    portfolioUrl?: string;
-    profession: string;
-    subscriptionTier: FreelancerPlanTier;
-    summary: string;
-    websiteUrl?: string;
-    yearsExperience: number;
-  }) {
+  async registerFreelancer(payload: FreelancerRegistrationPayload) {
     const normalizedCep = sanitizeCep(payload.cep);
+    const normalizedEmail = normalizeEmail(payload.email);
+    await assertAnonymousSignup();
     if (normalizedCep.length !== 8) {
-      throw new Error('Informe um CEP v?lido com 8 d?gitos.');
+      throw new Error('Informe um CEP válido com 8 dígitos.');
     }
 
-    const [city, state] = payload.location.split(',').map((part) => part?.trim() ?? '');
-    const hasCnpj = payload.hasCnpj.trim().toLowerCase().startsWith('s');
-    const { data, error } = await supabase.auth.signUp({
-      email: payload.email.trim().toLowerCase(),
-      password: payload.password,
-      options: {
-        data: {
-          avatar_url: normalizeText(payload.avatarUrl),
-          banner_url: normalizeText(payload.bannerUrl),
-          category: payload.category,
-          cep: normalizedCep,
-          city,
-          description: payload.description,
-          email: payload.email.trim().toLowerCase(),
-          experience_level: payload.experienceLevel,
-          full_name: payload.name,
-          has_cnpj: hasCnpj,
-          linkedin_url: normalizeText(payload.linkedinUrl),
-          name: payload.name,
-          phone: payload.phone,
-          portfolio_url: normalizeText(payload.portfolioUrl),
-          profession: payload.profession,
-          role: 'freelancer',
-          state,
-          subscription_tier: payload.subscriptionTier,
-          summary: payload.summary,
-          user_type: 'freelancer',
-          website_url: normalizeText(payload.websiteUrl),
-          years_experience: payload.yearsExperience,
-        },
-      },
+    if (!normalizedEmail) {
+      throw new Error('Informe um e-mail válido.');
+    }
+
+    await assertSignupIdentifiersAvailable({
+      email: normalizedEmail,
+      phone: payload.phone,
     });
 
-    if (error) {
-      throw toError(error, 'N?o foi poss?vel concluir o cadastro.');
+    const [city, state] = payload.location.split(',').map((part) => part?.trim() ?? '');
+    const serverRegistration = await registerViaServer(
+      '/api/auth/register/freelancer',
+      payload,
+      'Não foi possível concluir o cadastro.',
+    );
+    if (serverRegistration) {
+      return serverRegistration;
     }
 
-    if (data.user && data.session) {
-      const user = await materializeAuthUser(data.user);
-      return {
-        user,
-        requiresEmailConfirmation: false,
-      } satisfies RegistrationResponse;
+    return registerViaSupabase({
+      email: normalizedEmail,
+      password: payload.password,
+      fallbackMessage: 'Não foi possível concluir o cadastro.',
+      metadata: {
+        avatar_url: normalizeText(payload.avatarUrl),
+        banner_url: normalizeText(payload.bannerUrl),
+        category: payload.category,
+        cep: normalizedCep,
+        city,
+        description: payload.description,
+        email: normalizedEmail,
+        experience_level: payload.experienceLevel,
+        full_name: payload.name,
+        linkedin_url: normalizeText(payload.linkedinUrl),
+        name: payload.name,
+        phone: payload.phone,
+        portfolio_url: normalizeText(payload.portfolioUrl),
+        profession: payload.profession,
+        role: 'freelancer',
+        state,
+        subscription_tier: payload.subscriptionTier,
+        summary: payload.summary,
+        user_type: 'freelancer',
+        website_url: normalizeText(payload.websiteUrl),
+        years_experience: payload.yearsExperience,
+      },
+    });
+  },
+
+  async createFreelancerCheckout(payload: FreelancerRegistrationPayload) {
+    const normalizedCep = sanitizeCep(payload.cep);
+    const normalizedEmail = normalizeEmail(payload.email);
+    await assertAnonymousSignup();
+    if (normalizedCep.length !== 8) {
+      throw new Error('Informe um CEP válido com 8 dígitos.');
     }
 
-    return {
-      user: null,
-      requiresEmailConfirmation: true,
-    } satisfies RegistrationResponse;
+    if (!normalizedEmail) {
+      throw new Error('Informe um e-mail válido.');
+    }
+
+    await assertSignupIdentifiersAvailable({
+      email: normalizedEmail,
+      phone: payload.phone,
+    });
+
+    return startFreelancerCheckoutViaServer({
+      ...payload,
+      cep: normalizedCep,
+      email: normalizedEmail,
+    });
+  },
+
+  async getFreelancerSubscriptionWorkspace() {
+    return getFreelancerSubscriptionWorkspaceViaSupabase();
+  },
+
+  async startFreelancerSubscriptionCheckout(input: {
+    cnpjActive: boolean;
+    planTier: FreelancerPlanTier;
+    source?: 'subscription_page' | 'dashboard' | 'retry';
+  }) {
+    return startFreelancerSubscriptionCheckoutViaSupabase(input);
+  },
+
+  async getPaymentCheckout(checkoutId: string) {
+    try {
+      return await getPaymentCheckoutViaServer(checkoutId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (message && !isSetupError(message)) {
+        return getPaymentCheckoutViaSupabase(checkoutId);
+      }
+
+      throw error;
+    }
+  },
+
+  async completeFreelancerMockCheckout(
+    checkoutId: string,
+    outcome: 'approved' | 'pending' | 'failed',
+  ) {
+    try {
+      return await completeFreelancerMockCheckoutViaServer(checkoutId, outcome);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (message && !isSetupError(message)) {
+        return completeFreelancerMockCheckoutViaSupabase(checkoutId, outcome);
+      }
+
+      throw error;
+    }
+  },
+
+  async retryFreelancerCheckout() {
+    return retryFreelancerCheckoutViaServer();
   },
 
   async login(payload: { email: string; password: string }) {
@@ -1251,11 +1909,11 @@ export const api = {
     });
 
     if (error) {
-      throw toError(error, 'N?o foi poss?vel entrar.');
+      throw toError(error, 'Não foi possível entrar.');
     }
 
     if (!data.user) {
-      throw new Error('N?o foi poss?vel validar sua conta.');
+      throw new Error('Não foi possível validar sua conta.');
     }
 
     const user = await materializeAuthUser(data.user);
@@ -1267,7 +1925,7 @@ export const api = {
   async getSession() {
     const authUser = await selectAuthenticatedUser();
     if (!authUser) {
-      throw new Error('Fa?a login para continuar.');
+      throw new Error('Faça login para continuar.');
     }
 
     const user = await materializeAuthUser(authUser);
@@ -1279,7 +1937,7 @@ export const api = {
   async logout() {
     const { error } = await supabase.auth.signOut();
     if (error) {
-      throw toError(error, 'N?o foi poss?vel encerrar a sess?o.');
+      throw toError(error, 'Não foi possível encerrar a sessão.');
     }
 
     return null;
@@ -1291,12 +1949,12 @@ export const api = {
     const sessionUser = await requireSessionUser('client');
     const freelancerProfile = await selectProfileById(payload.freelancerId);
     if (!freelancerProfile || normalizeUserRole(freelancerProfile) !== 'freelancer') {
-      throw new Error('Freelancer n?o encontrado.');
+      throw new Error('Freelancer não encontrado.');
     }
 
     const freelancerDetails = await selectFreelancerProfileByUserId(payload.freelancerId);
     if (normalizeSubscriptionStatus(freelancerDetails?.subscription_status) !== 'active') {
-      throw new Error('Este freelancer n?o est? dispon?vel para novos contatos.');
+      throw new Error('Este freelancer não está disponível para novos contatos.');
     }
 
     const existing = await unwrap(
@@ -1306,7 +1964,7 @@ export const api = {
         .eq('client_user_id', sessionUser.id)
         .eq('freelancer_user_id', payload.freelancerId)
         .maybeSingle(),
-      'N?o foi poss?vel localizar a conversa.',
+      'Não foi possível localizar a conversa.',
     );
 
     let contactId: string;
@@ -1322,7 +1980,7 @@ export const api = {
             updated_at: new Date().toISOString(),
           })
           .eq('id', existingContact.id),
-        'N?o foi poss?vel atualizar a conversa.',
+        'Não foi possível atualizar a conversa.',
       );
 
       contactId = existingContact.id;
@@ -1338,7 +1996,7 @@ export const api = {
           })
           .select('*')
           .single(),
-        'N?o foi poss?vel iniciar a conversa.',
+        'Não foi possível iniciar a conversa.',
       )) as ContactRow;
 
       contactId = inserted.id;
@@ -1351,7 +2009,7 @@ export const api = {
         sender_role: 'client',
         sender_user_id: sessionUser.id,
       }),
-      'N?o foi poss?vel enviar sua mensagem.',
+      'Não foi possível enviar sua mensagem.',
     );
 
     return loadContactById(contactId);
@@ -1364,7 +2022,7 @@ export const api = {
       contact.clientId === sessionUser.id || contact.freelancerId === sessionUser.id;
 
     if (!isParticipant) {
-      throw new Error('Voc? n?o pode responder esta conversa.');
+      throw new Error('Você não pode responder esta conversa.');
     }
 
     await unwrap(
@@ -1374,7 +2032,7 @@ export const api = {
         sender_role: sessionUser.role,
         sender_user_id: sessionUser.id,
       }),
-      'N?o foi poss?vel enviar sua mensagem.',
+      'Não foi possível enviar sua mensagem.',
     );
 
     await unwrap(
@@ -1385,10 +2043,37 @@ export const api = {
           updated_at: new Date().toISOString(),
         })
         .eq('id', contactId),
-      'N?o foi poss?vel atualizar a conversa.',
+      'Não foi possível atualizar a conversa.',
     );
 
     return loadContactById(contactId);
+  },
+
+  async markContactAsRead(contactId: string, messageId: string) {
+    const sessionUser = await requireSessionUser();
+    const contact = await loadContactById(contactId);
+    const isParticipant =
+      contact.clientId === sessionUser.id || contact.freelancerId === sessionUser.id;
+
+    if (!isParticipant) {
+      throw new Error('Voce nao pode atualizar esta conversa.');
+    }
+
+    await unwrap(
+      supabase.from('contact_reads').upsert(
+        {
+          contact_id: contactId,
+          user_id: sessionUser.id,
+          last_read_message_id: messageId,
+          last_read_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'contact_id,user_id' },
+      ),
+      'Nao foi possivel registrar a leitura da conversa.',
+    );
+
+    return null;
   },
 
   async uploadProfileAsset(kind: ProfileAssetKind, file: File) {
@@ -1407,7 +2092,7 @@ export const api = {
         contentType: file.type || `image/${extension === 'jpg' ? 'jpeg' : extension}`,
         upsert: true,
       }),
-      'N?o foi poss?vel enviar a imagem para o Storage.',
+      'Não foi possível enviar a imagem para o Storage.',
     );
 
     const { data } = supabase.storage.from(bucket).getPublicUrl(path);
@@ -1416,7 +2101,7 @@ export const api = {
     if (kind === 'avatar') {
       await unwrap(
         supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', sessionUser.id),
-        'A imagem foi enviada, mas n?o foi poss?vel atualizar o avatar.',
+        'A imagem foi enviada, mas não foi possível atualizar o avatar.',
       );
     } else {
       await unwrap(
@@ -1424,7 +2109,7 @@ export const api = {
           .from('freelancer_profiles')
           .update({ banner_url: publicUrl })
           .eq('user_id', sessionUser.id),
-        'A imagem foi enviada, mas n?o foi poss?vel atualizar o banner.',
+        'A imagem foi enviada, mas não foi possível atualizar o banner.',
       );
     }
 
@@ -1438,9 +2123,14 @@ export const api = {
   async getInbox() {
     const sessionUser = await requireSessionUser();
     const contacts = await loadContactsForUser(sessionUser.id);
+    const seenMessageIds = await loadSeenMessageIds(
+      sessionUser.id,
+      contacts.map((contact) => contact.id),
+    );
 
     return {
       contacts,
+      seenMessageIds,
     } satisfies ConversationInbox;
   },
 
@@ -1453,7 +2143,7 @@ export const api = {
     ]);
 
     if (!profile) {
-      throw new Error('Conta freelancer n?o encontrada.');
+      throw new Error('Conta freelancer não encontrada.');
     }
 
     const messagesReceived = contacts.reduce((total, contact) => {
@@ -1473,7 +2163,6 @@ export const api = {
       account: {
         email: profile.email,
         phone: normalizeText(profile.phone) ?? '',
-        hasCnpj: freelancerRow?.has_cnpj === true,
       },
     } satisfies FreelancerDashboard;
   },
@@ -1519,7 +2208,7 @@ export const api = {
     const state = normalizeText(payload.state)?.toUpperCase();
 
     if (cep.length !== 8) {
-      throw new Error('Informe um CEP v?lido com 8 d?gitos.');
+      throw new Error('Informe um CEP válido com 8 dígitos.');
     }
 
     if (!city || !state) {
@@ -1536,7 +2225,7 @@ export const api = {
           updated_at: new Date().toISOString(),
         })
         .eq('user_id', sessionUser.id),
-      'N?o foi poss?vel salvar a localiza??o do freelancer.',
+      'Não foi possível salvar a localização do freelancer.',
     );
 
     await unwrap(
@@ -1560,14 +2249,13 @@ export const api = {
 
   async getClientDashboard(init?: RequestInit) {
     const sessionUser = await requireSessionUser('client');
-    const [profile, contacts, freelancers] = await Promise.all([
+    const [profile, freelancers] = await Promise.all([
       selectProfileById(sessionUser.id),
-      loadContactsForUser(sessionUser.id),
-      listPublicFreelancers(init),
+      listPublicFreelancers(undefined, init),
     ]);
 
     if (!profile) {
-      throw new Error('Conta de cliente n?o encontrada.');
+      throw new Error('Conta de cliente não encontrada.');
     }
 
     await selectClientProfileByUserId(sessionUser.id);
@@ -1575,11 +2263,11 @@ export const api = {
     return {
       profile: buildClientProfile(profile),
       favorites: freelancers.slice(0, 3),
-      recentContacts: contacts.slice(0, 5),
+      recentContacts: [],
       notifications: [
-        'Sua conversa foi registrada no chat interno da plataforma.',
-        'Novas respostas aparecem direto na central de mensagens.',
-        'Toda a comunica??o oficial entre cliente e freelancer fica dentro do site.',
+        'O perfil agora é o ponto principal para avaliar o profissional antes do contato.',
+        'O primeiro contato pode seguir por WhatsApp, site ou LinkedIn conforme o perfil.',
+        'Sua conta continua útil para organizar busca, favoritos e próximos passos.',
       ],
     } satisfies ClientDashboard;
   },

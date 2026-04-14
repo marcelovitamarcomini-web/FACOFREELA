@@ -1,50 +1,20 @@
-﻿import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
 import type {
-  ClientDashboard,
-  ClientProfile,
-  ContactThreadMessage,
   ContactMessage,
-  Freelancer,
-  FreelancerPlanTier,
-  FreelancerDashboard,
-  PortfolioItem,
-  SubscriptionPlan,
+  ContactThreadMessage,
   UserRole,
 } from '../../shared/contracts.js';
-import {
-  freelancerPlanCatalog,
-  getFreelancerPlanPrice,
-  platformContactChannel,
-} from '../../shared/contracts.js';
+import { platformContactChannel } from '../../shared/contracts.js';
 import {
   createSessionExpiry,
   createSessionToken,
+  decryptSessionSecret,
+  encryptSessionSecret,
+  hashSessionToken,
   isSessionExpired,
 } from './auth.js';
-
-export interface StoredFreelancer {
-  // Local freelancer residue only.
-  // It is not used for cadastro or autenticação.
-  // It survives temporarily for operational/showcase fields not present in Supabase yet.
-  email: string;
-  hasCnpj: boolean;
-  phone: string;
-  profile: Freelancer;
-  subscription: SubscriptionPlan;
-  metrics: FreelancerDashboard['metrics'];
-}
-
-export interface StoredClient {
-  // Local client residue only.
-  // It is no longer used for cadastro or autenticação.
-  profile: ClientProfile;
-}
+import { getSupabaseServerReadClient } from './supabase.js';
 
 export interface StoredSession {
-  // HTTP-only app session kept locally for now.
-  // This is operational state, not user identity source of truth.
   token: string;
   userId: string;
   role: UserRole;
@@ -54,691 +24,489 @@ export interface StoredSession {
   supabaseAccessTokenExpiresAt?: string | null;
 }
 
-export interface AppStore {
-  // Local freelancer residue for operational/showcase fields outside Supabase.
-  freelancers: StoredFreelancer[];
-  // Local client residue kept only while some operational flows still read it.
-  clients: StoredClient[];
-  // Operational contact persistence. This remains local until a later persistence block.
-  contacts: ContactMessage[];
-  // Operational HTTP-only sessions. This remains local until a later session block.
-  sessions: StoredSession[];
-}
+type AppSessionRow = {
+  token: string;
+  user_id: string;
+  role: UserRole;
+  expires_at: string;
+  supabase_access_token: string | null;
+  supabase_refresh_token: string | null;
+  supabase_access_token_expires_at: string | null;
+};
 
-const DATA_DIR = resolve(process.cwd(), 'server', 'data');
-const STORE_FILE = resolve(DATA_DIR, 'store.json');
-const supabaseUserIdPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+type ContactRow = {
+  id: string;
+  client_user_id: string;
+  freelancer_user_id: string;
+  subject: string;
+  status: ContactMessage['status'] | null;
+  created_at: string;
+  updated_at: string | null;
+};
 
-function basePortfolio(url: string): PortfolioItem[] {
-  return [
-    {
-      title: 'Projeto em destaque',
-      description: 'Estudo de caso com foco em resultado mensurável e apresentação profissional.',
-      url,
-    },
-    {
-      title: 'Portfólio completo',
-      description: 'Coleção de trabalhos recentes com contexto, processo e resultados.',
-      url,
-    },
-  ];
-}
+type ContactMessageRow = {
+  id: string;
+  contact_id: string;
+  sender_user_id: string;
+  sender_role: ContactThreadMessage['senderRole'];
+  body: string;
+  created_at: string;
+};
 
-function createSubscriptionPlan(
-  tier: FreelancerPlanTier,
-  hasCnpj = false,
-  overrides?: Partial<Omit<SubscriptionPlan, 'tier' | 'name' | 'priceMonthly'>>,
-): SubscriptionPlan {
-  const plan = freelancerPlanCatalog[tier];
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  email: string;
+  phone: string | null;
+  city: string | null;
+  state: string | null;
+  user_type: UserRole | 'admin' | null;
+};
 
-  return {
-    tier,
-    name: plan.name,
-    priceMonthly: getFreelancerPlanPrice(tier, hasCnpj),
-    status: overrides?.status ?? 'active',
-    startedAt: overrides?.startedAt ?? new Date().toISOString(),
-    endsAt:
-      overrides?.endsAt ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-  };
-}
+const supabase = getSupabaseServerReadClient();
 
-function inferSubscriptionTier(subscription: Partial<SubscriptionPlan>): FreelancerPlanTier {
-  if (
-    subscription.tier === 'booster' ||
-    subscription.name?.toLowerCase().includes('booster') ||
-    Number(subscription.priceMonthly) > freelancerPlanCatalog.normal.priceMonthly
-  ) {
-    return 'booster';
+function requireSupabase() {
+  if (!supabase) {
+    throw new Error('Infraestrutura do Supabase indisponivel no servidor.');
   }
 
-  return 'normal';
+  return supabase;
 }
 
-function normalizeSubscriptionPlan(
-  subscription: Partial<SubscriptionPlan>,
-  hasCnpj = false,
-): SubscriptionPlan {
-  const tier = inferSubscriptionTier(subscription);
-
-  return createSubscriptionPlan(tier, hasCnpj, {
-    status: subscription.status,
-    startedAt: subscription.startedAt,
-    endsAt: subscription.endsAt,
-  });
+function normalizeEmail(value?: string | null): string | undefined {
+  const normalized = value?.trim().toLowerCase();
+  return normalized ? normalized : undefined;
 }
 
-function createSeedContact(input: Omit<ContactMessage, 'messages'>): ContactMessage {
+function buildDisplayName(profile?: ProfileRow | null) {
+  return profile?.full_name?.trim() || profile?.email || 'Usuario';
+}
+
+function buildLocation(city?: string | null, state?: string | null) {
+  return [city?.trim(), state?.trim()].filter(Boolean).join(', ');
+}
+
+function mapSessionRow(row: AppSessionRow, rawToken?: string): StoredSession {
   return {
-    ...input,
-    messages: [
-      {
-        id: `${input.id}-message-1`,
-        senderRole: 'client',
-        senderName: input.clientName,
-        body: input.message,
-        createdAt: input.createdAt,
-      },
-    ],
+    token: rawToken ?? row.token,
+    userId: row.user_id,
+    role: row.role,
+    expiresAt: row.expires_at,
+    supabaseAccessToken: decryptSessionSecret(row.supabase_access_token),
+    supabaseRefreshToken: decryptSessionSecret(row.supabase_refresh_token),
+    supabaseAccessTokenExpiresAt: row.supabase_access_token_expires_at,
   };
 }
 
-function normalizeContactChannel(channel: unknown): ContactMessage['channel'] {
-  void channel;
-  return platformContactChannel;
+function sessionTokenCandidates(token: string): string[] {
+  return [...new Set([token, hashSessionToken(token)])];
 }
 
-function createInitialContactMessage(contact: Partial<ContactMessage>): ContactThreadMessage {
-  return {
-    id: `${contact.id ?? `contact-${Date.now()}`}-message-1`,
-    senderRole: 'client',
-    senderName: contact.clientName ?? 'Cliente',
-    body: contact.message ?? '',
-    createdAt: contact.createdAt ?? new Date().toISOString(),
-  };
-}
-
-function normalizeThreadMessages(contact: Partial<ContactMessage>): ContactThreadMessage[] {
-  if (!Array.isArray(contact.messages) || contact.messages.length === 0) {
-    return [createInitialContactMessage(contact)];
-  }
-
-  return contact.messages.map((message, index) => ({
-    id: message?.id ?? `${contact.id ?? 'contact'}-message-${index + 1}`,
-    senderRole: message?.senderRole === 'freelancer' ? 'freelancer' : 'client',
-    senderName:
-      message?.senderName ??
-      (message?.senderRole === 'freelancer' ? contact.freelancerName : contact.clientName) ??
-      'Usuário',
-    body: message?.body ?? '',
-    createdAt: message?.createdAt ?? contact.createdAt ?? new Date().toISOString(),
-  }));
-}
-
-function findStoredFreelancerByContact(
-  store: AppStore,
-  contact: Partial<ContactMessage>,
-): StoredFreelancer | undefined {
-  return (
-    store.freelancers.find((freelancer) => freelancer.profile.id === contact.freelancerId) ??
-    store.freelancers.find(
-      (freelancer) =>
-        Boolean(contact.freelancerEmail) &&
-        freelancer.email.toLowerCase() === contact.freelancerEmail?.toLowerCase(),
-    ) ??
-    store.freelancers.find(
-      (freelancer) =>
-        Boolean(contact.freelancerName) && freelancer.profile.name === contact.freelancerName,
-    )
-  );
-}
-
-function normalizeContactRecord(store: AppStore, rawContact: ContactMessage): ContactMessage {
-  const matchedClient =
-    store.clients.find((client) => client.profile.id === rawContact.clientId) ??
-    store.clients.find((client) => client.profile.email === rawContact.clientEmail) ??
-    store.clients.find(
-      (client) =>
-        client.profile.name === rawContact.clientName &&
-        client.profile.location === rawContact.clientLocation,
-    );
-  const matchedFreelancer = findStoredFreelancerByContact(store, rawContact);
-  const messages = normalizeThreadMessages(rawContact);
-  const latestMessage = messages[messages.length - 1];
-
-  return {
-    ...rawContact,
-    freelancerName: rawContact.freelancerName || matchedFreelancer?.profile.name || 'Freelancer',
-    freelancerEmail: rawContact.freelancerEmail ?? matchedFreelancer?.email,
-    clientId: rawContact.clientId ?? matchedClient?.profile.id,
-    clientName: rawContact.clientName || matchedClient?.profile.name || 'Cliente',
-    clientLocation: rawContact.clientLocation || matchedClient?.profile.location || '',
-    clientEmail: rawContact.clientEmail ?? matchedClient?.profile.email,
-    clientPhone: rawContact.clientPhone ?? matchedClient?.profile.phone,
-    channel: normalizeContactChannel(rawContact.channel),
-    message: latestMessage.body,
-    messages,
-  };
-}
-
-function hydrateContact(store: AppStore, contact: ContactMessage): ContactMessage {
-  return normalizeContactRecord(store, contact);
-}
-
-function createSeedStore(): AppStore {
-  return {
-    freelancers: [],
-    clients: [],
-    contacts: [],
-    sessions: [],
-  };
-}
-
-function ensureStoreFile() {
-  mkdirSync(DATA_DIR, { recursive: true });
-
-  if (!existsSync(STORE_FILE)) {
-    writeStore(createSeedStore());
-  }
-}
-
-function removeExpiredSessions(store: AppStore): boolean {
-  const nextSessions = store.sessions.filter((session) => !isSessionExpired(session.expiresAt));
-
-  if (nextSessions.length === store.sessions.length) {
+async function deleteExpiredSessionIfNeeded(row: AppSessionRow) {
+  if (!isSessionExpired(row.expires_at)) {
     return false;
   }
 
-  store.sessions = nextSessions;
+  await requireSupabase().from('app_sessions').delete().eq('token', row.token);
   return true;
 }
 
-function normalizeStore(store: AppStore): boolean {
-  let changed = removeExpiredSessions(store);
-  const normalizedSessions = store.sessions.filter((session) =>
-    supabaseUserIdPattern.test(session.userId),
-  );
-  const normalizedFreelancers = store.freelancers
-    .filter((freelancer) => supabaseUserIdPattern.test(freelancer.profile.id))
-    .map((freelancer) => ({
-      email: freelancer.email,
-      hasCnpj: freelancer.hasCnpj === true,
-      phone: freelancer.phone,
-      profile: freelancer.profile,
-      subscription: normalizeSubscriptionPlan(freelancer.subscription, freelancer.hasCnpj === true),
-      metrics: freelancer.metrics,
+async function selectProfilesByIds(userIds: string[]): Promise<ProfileRow[]> {
+  if (userIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await requireSupabase()
+    .from('profiles')
+    .select('id,full_name,email,phone,city,state,user_type')
+    .in('id', userIds);
+
+  if (error || !data) {
+    return [];
+  }
+
+  return data as ProfileRow[];
+}
+
+async function hydrateContacts(contactRows: ContactRow[]): Promise<ContactMessage[]> {
+  if (contactRows.length === 0) {
+    return [];
+  }
+
+  const contactIds = contactRows.map((contact) => contact.id);
+  const participantIds = [
+    ...new Set(
+      contactRows.flatMap((contact) => [contact.client_user_id, contact.freelancer_user_id]),
+    ),
+  ];
+
+  const [messageResult, profiles] = await Promise.all([
+    requireSupabase()
+      .from('contact_messages')
+      .select('id,contact_id,sender_user_id,sender_role,body,created_at')
+      .in('contact_id', contactIds)
+      .order('created_at', { ascending: true }),
+    selectProfilesByIds(participantIds),
+  ]);
+
+  const messageRows = !messageResult.error && messageResult.data
+    ? (messageResult.data as ContactMessageRow[])
+    : [];
+  const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+  const messagesByContact = new Map<string, ContactMessageRow[]>();
+
+  messageRows.forEach((message) => {
+    const currentMessages = messagesByContact.get(message.contact_id) ?? [];
+    currentMessages.push(message);
+    messagesByContact.set(message.contact_id, currentMessages);
+  });
+
+  return contactRows.map((contact) => {
+    const freelancerProfile = profileMap.get(contact.freelancer_user_id) ?? null;
+    const clientProfile = profileMap.get(contact.client_user_id) ?? null;
+    const threadRows = messagesByContact.get(contact.id) ?? [];
+    const messages: ContactThreadMessage[] = threadRows.map((message) => ({
+      id: message.id,
+      senderRole: message.sender_role,
+      senderName:
+        buildDisplayName(profileMap.get(message.sender_user_id) ?? null) ||
+        (message.sender_role === 'freelancer' ? 'Freelancer' : 'Cliente'),
+      body: message.body,
+      createdAt: message.created_at,
     }));
+    const latestMessage = messages[messages.length - 1];
 
-  if (JSON.stringify(normalizedFreelancers) !== JSON.stringify(store.freelancers)) {
-    store.freelancers = normalizedFreelancers;
-    changed = true;
+    return {
+      id: contact.id,
+      freelancerId: contact.freelancer_user_id,
+      freelancerName: buildDisplayName(freelancerProfile),
+      freelancerEmail: freelancerProfile?.email,
+      clientId: contact.client_user_id,
+      clientName: buildDisplayName(clientProfile),
+      clientLocation: buildLocation(clientProfile?.city, clientProfile?.state),
+      clientEmail: clientProfile?.email,
+      clientPhone: clientProfile?.phone ?? undefined,
+      subject: contact.subject,
+      message: latestMessage?.body ?? '',
+      channel: platformContactChannel,
+      createdAt: contact.created_at,
+      status: contact.status ?? 'Novo',
+      messages,
+    };
+  });
+}
+
+async function resolveProfileId(input: {
+  role: UserRole;
+  userId?: string;
+  email?: string;
+}): Promise<string | undefined> {
+  if (input.userId) {
+    return input.userId;
   }
 
-  if (JSON.stringify(normalizedSessions) !== JSON.stringify(store.sessions)) {
-    store.sessions = normalizedSessions;
-    changed = true;
+  const normalizedEmail = normalizeEmail(input.email);
+  if (normalizedEmail) {
+    const { data, error } = await requireSupabase()
+      .from('profiles')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .maybeSingle<{ id: string }>();
+
+    if (!error && data?.id) {
+      return data.id;
+    }
   }
 
-  if (store.clients.length > 0) {
-    store.clients = [];
-    changed = true;
-  }
-
-  const normalizedContacts = store.contacts.map((contact) => normalizeContactRecord(store, contact));
-
-  if (JSON.stringify(normalizedContacts) !== JSON.stringify(store.contacts)) {
-    store.contacts = normalizedContacts;
-    changed = true;
-  }
-
-  return changed;
+  return undefined;
 }
 
-function stripUtf8Bom(value: string): string {
-  return value.charCodeAt(0) === 0xfeff ? value.slice(1) : value;
-}
-
-function readStore(): AppStore {
-  ensureStoreFile();
-
-  const rawStore = readFileSync(STORE_FILE, 'utf8');
-  const store = JSON.parse(stripUtf8Bom(rawStore)) as AppStore;
-  const changed = normalizeStore(store);
-
-  if (changed) {
-    writeStore(store);
-  }
-
-  return store;
-}
-
-function writeStore(store: AppStore) {
-  mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(STORE_FILE, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
-}
-
-function mutateStore<T>(mutate: (store: AppStore) => T): T {
-  const store = readStore();
-  const result = mutate(store);
-
-  writeStore(store);
-
-  return result;
-}
-
-export function findFreelancerRecordById(id: string): StoredFreelancer | undefined {
-  const store = readStore();
-
-  return store.freelancers.find((item) => item.profile.id === id);
-}
-
-export function findFreelancerRecordByEmail(email: string): StoredFreelancer | undefined {
-  const store = readStore();
-  const normalizedEmail = email.trim().toLowerCase();
-
-  return store.freelancers.find((item) => item.email.toLowerCase() === normalizedEmail);
-}
-
-export function findClientRecordById(id: string): StoredClient | undefined {
-  const store = readStore();
-
-  return store.clients.find((item) => item.profile.id === id);
-}
-
-export function findClientRecordByEmail(email: string): StoredClient | undefined {
-  const store = readStore();
-  const normalizedEmail = email.trim().toLowerCase();
-
-  return store.clients.find((item) => item.profile.email.toLowerCase() === normalizedEmail);
-}
-
-export function findContactById(id: string): ContactMessage | undefined {
-  const store = readStore();
-  const contact = store.contacts.find((item) => item.id === id);
-
-  return contact ? hydrateContact(store, contact) : undefined;
-}
-
-export function createSession(input: {
+export async function createSession(input: {
   userId: string;
   role: UserRole;
   supabaseAccessToken?: string | null;
   supabaseRefreshToken?: string | null;
   supabaseAccessTokenExpiresAt?: string | null;
-}): StoredSession {
-  // Local app session store. This is operational state, not user identity.
-  return mutateStore((store) => {
-    const session: StoredSession = {
-      token: createSessionToken(),
-      userId: input.userId,
-      role: input.role,
-      expiresAt: createSessionExpiry(),
-      supabaseAccessToken: input.supabaseAccessToken ?? null,
-      supabaseRefreshToken: input.supabaseRefreshToken ?? null,
-      supabaseAccessTokenExpiresAt: input.supabaseAccessTokenExpiresAt ?? null,
-    };
+}): Promise<StoredSession> {
+  const session: StoredSession = {
+    token: createSessionToken(),
+    userId: input.userId,
+    role: input.role,
+    expiresAt: createSessionExpiry(),
+    supabaseAccessToken: input.supabaseAccessToken ?? null,
+    supabaseRefreshToken: input.supabaseRefreshToken ?? null,
+    supabaseAccessTokenExpiresAt: input.supabaseAccessTokenExpiresAt ?? null,
+  };
 
-    store.sessions.unshift(session);
-
-    return session;
+  const { error } = await requireSupabase().from('app_sessions').insert({
+    token: hashSessionToken(session.token),
+    user_id: session.userId,
+    role: session.role,
+    expires_at: session.expiresAt,
+    supabase_access_token: encryptSessionSecret(session.supabaseAccessToken),
+    supabase_refresh_token: encryptSessionSecret(session.supabaseRefreshToken),
+    supabase_access_token_expires_at: session.supabaseAccessTokenExpiresAt,
   });
+
+  if (error) {
+    throw new Error(error.message || 'Nao foi possivel criar a sessao do servidor.');
+  }
+
+  return session;
 }
 
-export function findSession(token: string): StoredSession | undefined {
-  const store = readStore();
+export async function findSession(token: string): Promise<StoredSession | undefined> {
+  const { data, error } = await requireSupabase()
+    .from('app_sessions')
+    .select(
+      'token,user_id,role,expires_at,supabase_access_token,supabase_refresh_token,supabase_access_token_expires_at',
+    )
+    .in('token', sessionTokenCandidates(token))
+    .maybeSingle<AppSessionRow>();
 
-  return store.sessions.find((session) => session.token === token);
+  if (error || !data) {
+    return undefined;
+  }
+
+  if (await deleteExpiredSessionIfNeeded(data)) {
+    return undefined;
+  }
+
+  return mapSessionRow(data, token);
 }
 
-export function updateSessionAuthState(
+export async function updateSessionAuthState(
   token: string,
   input: {
     supabaseAccessToken?: string | null;
     supabaseRefreshToken?: string | null;
     supabaseAccessTokenExpiresAt?: string | null;
   },
-): StoredSession | undefined {
-  return mutateStore((store) => {
-    const session = store.sessions.find((item) => item.token === token);
-    if (!session) {
-      return undefined;
-    }
+): Promise<StoredSession | undefined> {
+  const { data, error } = await requireSupabase()
+    .from('app_sessions')
+    .update({
+      supabase_access_token: encryptSessionSecret(input.supabaseAccessToken),
+      supabase_refresh_token: encryptSessionSecret(input.supabaseRefreshToken),
+      supabase_access_token_expires_at: input.supabaseAccessTokenExpiresAt ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .in('token', sessionTokenCandidates(token))
+    .select(
+      'token,user_id,role,expires_at,supabase_access_token,supabase_refresh_token,supabase_access_token_expires_at',
+    )
+    .maybeSingle<AppSessionRow>();
 
-    session.supabaseAccessToken = input.supabaseAccessToken ?? null;
-    session.supabaseRefreshToken = input.supabaseRefreshToken ?? null;
-    session.supabaseAccessTokenExpiresAt = input.supabaseAccessTokenExpiresAt ?? null;
+  if (error || !data) {
+    return undefined;
+  }
 
-    return session;
-  });
+  return mapSessionRow(data, token);
 }
 
-export function deleteSession(token: string) {
-  mutateStore((store) => {
-    store.sessions = store.sessions.filter((session) => session.token !== token);
-  });
+export async function deleteSession(token: string): Promise<void> {
+  await requireSupabase().from('app_sessions').delete().in('token', sessionTokenCandidates(token));
 }
 
-export function addContact(input: ContactMessage): ContactMessage {
-  return mutateStore((store) => {
-    const normalizedContact = normalizeContactRecord(store, input);
+export async function findContactById(id: string): Promise<ContactMessage | undefined> {
+  const { data, error } = await requireSupabase()
+    .from('contacts')
+    .select('id,client_user_id,freelancer_user_id,subject,status,created_at,updated_at')
+    .eq('id', id)
+    .maybeSingle<ContactRow>();
 
-    store.contacts.unshift(normalizedContact);
+  if (error || !data) {
+    return undefined;
+  }
 
-    const freelancer = findStoredFreelancerByContact(store, normalizedContact);
-    if (freelancer) {
-      freelancer.metrics.contactClicks += 1;
-      freelancer.metrics.messagesReceived += 1;
-    }
-
-    return normalizedContact;
-  });
+  const [contact] = await hydrateContacts([data]);
+  return contact;
 }
 
-function matchesConversationParty(
-  contact: ContactMessage,
-  input: {
-    freelancerId?: string;
-    freelancerEmail?: string;
-    clientId?: string;
-    clientEmail?: string;
-  },
-) {
-  const sameFreelancer =
-    (input.freelancerId && contact.freelancerId === input.freelancerId) ||
-    (input.freelancerEmail &&
-      contact.freelancerEmail?.toLowerCase() === input.freelancerEmail.toLowerCase());
-  const sameClient =
-    (input.clientId && contact.clientId === input.clientId) ||
-    (input.clientEmail && contact.clientEmail?.toLowerCase() === input.clientEmail.toLowerCase());
-
-  return Boolean(sameFreelancer && sameClient);
-}
-
-export function findConversationBetweenParties(input: {
-  freelancerId?: string;
-  freelancerEmail?: string;
-  clientId?: string;
-  clientEmail?: string;
-}): ContactMessage | undefined {
-  const store = readStore();
-  const contact = store.contacts.find((item) => matchesConversationParty(item, input));
-
-  return contact ? hydrateContact(store, contact) : undefined;
-}
-
-export function createOrContinueContact(input: Omit<ContactMessage, 'id' | 'createdAt' | 'messages'>): {
+export async function createOrContinueContact(
+  input: Omit<ContactMessage, 'id' | 'createdAt' | 'messages'>,
+): Promise<{
   contact: ContactMessage;
   created: boolean;
-} {
-  return mutateStore((store) => {
-    const currentIndex = store.contacts.findIndex((item) =>
-      matchesConversationParty(item, {
-        freelancerId: input.freelancerId,
-        freelancerEmail: input.freelancerEmail,
-        clientId: input.clientId,
-        clientEmail: input.clientEmail,
-      }),
-    );
-
-    if (currentIndex >= 0) {
-      const contact = store.contacts[currentIndex];
-      const createdAt = new Date().toISOString();
-      const nextMessage: ContactThreadMessage = {
-        id: `${contact.id}-message-${contact.messages.length + 1}`,
-        senderRole: 'client',
-        senderName: input.clientName,
-        body: input.message,
-        createdAt,
-      };
-
-      contact.freelancerId = input.freelancerId;
-      contact.freelancerName = input.freelancerName;
-      contact.freelancerEmail = input.freelancerEmail;
-      contact.clientId = input.clientId;
-      contact.clientName = input.clientName;
-      contact.clientLocation = input.clientLocation;
-      contact.clientEmail = input.clientEmail;
-      contact.clientPhone = input.clientPhone;
-      contact.subject = input.subject;
-      contact.message = input.message;
-      contact.channel = input.channel;
-      contact.status = 'Novo';
-      contact.messages.push(nextMessage);
-
-      const freelancer = findStoredFreelancerByContact(store, contact);
-      if (freelancer) {
-        freelancer.metrics.messagesReceived += 1;
-      }
-
-      if (currentIndex > 0) {
-        store.contacts.splice(currentIndex, 1);
-        store.contacts.unshift(contact);
-      }
-
-      return {
-        contact: hydrateContact(store, contact),
-        created: false,
-      };
-    }
-
-    const contactId = `contact-${Date.now()}`;
-    const createdAt = new Date().toISOString();
-    const contact: ContactMessage = {
-      id: contactId,
-      createdAt,
-      messages: [
-        {
-          id: `${contactId}-message-1`,
-          senderRole: 'client',
-          senderName: input.clientName,
-          body: input.message,
-          createdAt,
-        },
-      ],
-      ...input,
-    };
-
-    const normalizedContact = normalizeContactRecord(store, contact);
-    store.contacts.unshift(normalizedContact);
-
-    const freelancer = findStoredFreelancerByContact(store, normalizedContact);
-    if (freelancer) {
-      freelancer.metrics.contactClicks += 1;
-      freelancer.metrics.messagesReceived += 1;
-    }
-
-    return {
-      contact: normalizedContact,
-      created: true,
-    };
+}> {
+  const clientId = await resolveProfileId({
+    role: 'client',
+    userId: input.clientId,
+    email: input.clientEmail,
   });
+  const freelancerId = await resolveProfileId({
+    role: 'freelancer',
+    userId: input.freelancerId,
+    email: input.freelancerEmail,
+  });
+
+  if (!clientId || !freelancerId) {
+    throw new Error('Nao foi possivel identificar os participantes da conversa.');
+  }
+
+  const supabaseClient = requireSupabase();
+  const existingResult = await supabaseClient
+    .from('contacts')
+    .select('id,client_user_id,freelancer_user_id,subject,status,created_at,updated_at')
+    .eq('client_user_id', clientId)
+    .eq('freelancer_user_id', freelancerId)
+    .maybeSingle<ContactRow>();
+
+  let created = false;
+  let contactRow: ContactRow | null = null;
+
+  if (!existingResult.error && existingResult.data) {
+    const updateResult = await supabaseClient
+      .from('contacts')
+      .update({
+        subject: input.subject,
+        status: 'Novo',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existingResult.data.id)
+      .select('id,client_user_id,freelancer_user_id,subject,status,created_at,updated_at')
+      .single<ContactRow>();
+
+    if (updateResult.error || !updateResult.data) {
+      throw new Error(updateResult.error?.message || 'Nao foi possivel atualizar a conversa.');
+    }
+
+    contactRow = updateResult.data;
+  } else {
+    const insertResult = await supabaseClient
+      .from('contacts')
+      .insert({
+        client_user_id: clientId,
+        freelancer_user_id: freelancerId,
+        subject: input.subject,
+        status: 'Novo',
+      })
+      .select('id,client_user_id,freelancer_user_id,subject,status,created_at,updated_at')
+      .single<ContactRow>();
+
+    if (insertResult.error || !insertResult.data) {
+      throw new Error(insertResult.error?.message || 'Nao foi possivel iniciar a conversa.');
+    }
+
+    created = true;
+    contactRow = insertResult.data;
+  }
+
+  const messageResult = await supabaseClient.from('contact_messages').insert({
+    contact_id: contactRow.id,
+    sender_user_id: clientId,
+    sender_role: 'client',
+    body: input.message,
+  });
+
+  if (messageResult.error) {
+    throw new Error(messageResult.error.message || 'Nao foi possivel enviar a mensagem.');
+  }
+
+  const contact = await findContactById(contactRow.id);
+  if (!contact) {
+    throw new Error('Nao foi possivel carregar a conversa apos salvar a mensagem.');
+  }
+
+  return { contact, created };
 }
 
-export function appendContactMessage(input: {
+export async function appendContactMessage(input: {
   contactId: string;
   senderRole: 'client' | 'freelancer';
+  senderUserId: string;
   senderName: string;
   message: string;
-}): ContactMessage | undefined {
-  return mutateStore((store) => {
-    const currentIndex = store.contacts.findIndex((item) => item.id === input.contactId);
-    const contact = currentIndex >= 0 ? store.contacts[currentIndex] : undefined;
+}): Promise<ContactMessage | undefined> {
+  void input.senderName;
 
-    if (!contact) {
-      return undefined;
-    }
-
-    const createdAt = new Date().toISOString();
-    const nextMessage: ContactThreadMessage = {
-      id: `${contact.id}-message-${contact.messages.length + 1}`,
-      senderRole: input.senderRole,
-      senderName: input.senderName,
-      body: input.message,
-      createdAt,
-    };
-
-    contact.messages.push(nextMessage);
-    contact.message = input.message;
-    contact.status = input.senderRole === 'freelancer' ? 'Respondido' : 'Novo';
-
-    if (input.senderRole === 'client') {
-      const freelancer = findStoredFreelancerByContact(store, contact);
-
-      if (freelancer) {
-        freelancer.metrics.messagesReceived += 1;
-      }
-    }
-
-    if (currentIndex > 0) {
-      store.contacts.splice(currentIndex, 1);
-      store.contacts.unshift(contact);
-    }
-
-    return hydrateContact(store, contact);
+  const insertResult = await requireSupabase().from('contact_messages').insert({
+    contact_id: input.contactId,
+    sender_user_id: input.senderUserId,
+    sender_role: input.senderRole,
+    body: input.message,
   });
+
+  if (insertResult.error) {
+    return undefined;
+  }
+
+  return findContactById(input.contactId);
 }
 
-export function listContactsByFreelancerIdentity(input: {
+export async function listContactsByFreelancerIdentity(input: {
   freelancerId?: string;
   freelancerEmail?: string;
   freelancerName?: string;
-}): ContactMessage[] {
-  // Contact persistence is still local in this phase.
-  const store = readStore();
+}): Promise<ContactMessage[]> {
+  const freelancerId = await resolveProfileId({
+    role: 'freelancer',
+    userId: input.freelancerId,
+    email: input.freelancerEmail,
+  });
+  if (!freelancerId) {
+    return [];
+  }
 
-  return store.contacts
-    .filter((contact) => {
-      if (input.freelancerId && contact.freelancerId === input.freelancerId) {
-        return true;
-      }
+  const { data, error } = await requireSupabase()
+    .from('contacts')
+    .select('id,client_user_id,freelancer_user_id,subject,status,created_at,updated_at')
+    .eq('freelancer_user_id', freelancerId)
+    .order('updated_at', { ascending: false });
 
-      if (
-        input.freelancerEmail &&
-        contact.freelancerEmail?.toLowerCase() === input.freelancerEmail.toLowerCase()
-      ) {
-        return true;
-      }
+  if (error || !data) {
+    return [];
+  }
 
-      if (input.freelancerName && contact.freelancerName === input.freelancerName) {
-        return true;
-      }
-
-      return false;
-    })
-    .map((contact) => hydrateContact(store, contact));
+  return hydrateContacts(data as ContactRow[]);
 }
 
-export function listContactsByClientIdentity(input: {
+export async function listContactsByClientIdentity(input: {
   clientId?: string;
   clientEmail?: string;
   clientName?: string;
-}): ContactMessage[] {
-  // Contact persistence is still local in this phase.
-  const store = readStore();
+}): Promise<ContactMessage[]> {
+  const clientId = await resolveProfileId({
+    role: 'client',
+    userId: input.clientId,
+    email: input.clientEmail,
+  });
+  if (!clientId) {
+    return [];
+  }
 
-  return store.contacts
-    .filter((contact) => {
-      if (input.clientId && contact.clientId === input.clientId) {
-        return true;
-      }
+  const { data, error } = await requireSupabase()
+    .from('contacts')
+    .select('id,client_user_id,freelancer_user_id,subject,status,created_at,updated_at')
+    .eq('client_user_id', clientId)
+    .order('updated_at', { ascending: false });
 
-      if (input.clientEmail && contact.clientEmail?.toLowerCase() === input.clientEmail.toLowerCase()) {
-        return true;
-      }
+  if (error || !data) {
+    return [];
+  }
 
-      if (input.clientName && contact.clientName === input.clientName) {
-        return true;
-      }
-
-      return false;
-    })
-    .map((contact) => hydrateContact(store, contact));
+  return hydrateContacts(data as ContactRow[]);
 }
 
-export function recordFreelancerProfileViewByIdentity(input: {
+export async function recordFreelancerProfileViewByIdentity(input: {
   freelancerId?: string;
   freelancerEmail?: string;
   freelancerSlug?: string;
-}): boolean {
-  // Operational metric fallback for public profile views while freelancer metrics
-  // still live in the local operational shadow.
-  return mutateStore((store) => {
-    const freelancer =
-      store.freelancers.find((item) => item.profile.id === input.freelancerId) ??
-      store.freelancers.find(
-        (item) =>
-          Boolean(input.freelancerEmail) &&
-          item.email.toLowerCase() === input.freelancerEmail?.toLowerCase(),
-      ) ??
-      store.freelancers.find((item) => item.profile.slug === input.freelancerSlug);
+}): Promise<boolean> {
+  void input.freelancerSlug;
 
-    if (!freelancer) {
-      return false;
-    }
-
-    freelancer.metrics.profileViews += 1;
-    return true;
+  const freelancerId = await resolveProfileId({
+    role: 'freelancer',
+    userId: input.freelancerId,
+    email: input.freelancerEmail,
   });
-}
-
-export function getFreelancerDashboard(id: string): FreelancerDashboard | undefined {
-  // Deprecated transition helper.
-  // Current Block 1 flow no longer uses this function; dashboard assembly is now
-  // centralized in user-store.ts using Supabase identity plus local operational residue.
-  const store = readStore();
-  const freelancer = store.freelancers.find((item) => item.profile.id === id);
-
-  if (!freelancer) {
-    return undefined;
+  if (!freelancerId) {
+    return false;
   }
 
-  return {
-    profile: freelancer.profile,
-    subscription: freelancer.subscription,
-    metrics: freelancer.metrics,
-    recentContacts: store.contacts
-      .filter((contact) => contact.freelancerId === id)
-      .slice(0, 5)
-      .map((contact) => hydrateContact(store, contact)),
-    account: {
-      email: freelancer.email,
-      phone: freelancer.phone,
-      hasCnpj: freelancer.hasCnpj,
-    },
-  };
+  const { error } = await requireSupabase().rpc('increment_freelancer_profile_views', {
+    target_user_id: freelancerId,
+  });
+
+  return !error;
 }
-
-export function getClientDashboard(id: string): ClientDashboard | undefined {
-  // Deprecated transition helper.
-  // Current Block 1 flow no longer uses this function; dashboard assembly is now
-  // centralized in user-store.ts using Supabase identity plus local operational residue.
-  const store = readStore();
-  const client = store.clients.find((item) => item.profile.id === id);
-
-  if (!client) {
-    return undefined;
-  }
-
-  return {
-    profile: client.profile,
-    favorites: store.freelancers
-      .filter((item) => item.subscription.status === 'active')
-      .slice(0, 3)
-      .map((item) => item.profile),
-    recentContacts: store.contacts
-      .filter(
-        (contact) =>
-          contact.clientId === client.profile.id ||
-          contact.clientEmail === client.profile.email ||
-          contact.clientName === client.profile.name,
-      )
-      .slice(0, 5)
-      .map((contact) => hydrateContact(store, contact)),
-    notifications: [
-      'Seu contato com Bruno Silva foi entregue com sucesso.',
-      'Novos profissionais verificados entraram em áreas de serviços e atendimento.',
-      'Você pode favoritar profissionais para comparar propostas depois.',
-    ],
-  };
-}
-

@@ -11,14 +11,22 @@ export const categories = [
 
 export const experienceLevels = ['Júnior', 'Pleno', 'Sênior'] as const;
 export const userRoles = ['client', 'freelancer'] as const;
-export const subscriptionStatuses = ['active', 'past_due', 'expired'] as const;
+export const subscriptionStatuses = ['pending', 'active', 'past_due', 'expired', 'canceled'] as const;
 export const freelancerPlanTiers = ['normal', 'booster'] as const;
+export const paymentCheckoutStatuses = ['open', 'approved', 'pending', 'failed', 'expired'] as const;
+export const paymentProviders = ['mock'] as const;
+export const paymentCheckoutChangeTypes = ['activation', 'upgrade', 'renewal'] as const;
+export const subscriptionFlowSources = ['signup', 'subscription_page', 'dashboard', 'retry'] as const;
 
 export type Category = (typeof categories)[number];
 export type ExperienceLevel = (typeof experienceLevels)[number];
 export type UserRole = (typeof userRoles)[number];
 export type SubscriptionStatus = (typeof subscriptionStatuses)[number];
 export type FreelancerPlanTier = (typeof freelancerPlanTiers)[number];
+export type PaymentCheckoutStatus = (typeof paymentCheckoutStatuses)[number];
+export type PaymentProvider = (typeof paymentProviders)[number];
+export type PaymentCheckoutChangeType = (typeof paymentCheckoutChangeTypes)[number];
+export type SubscriptionFlowSource = (typeof subscriptionFlowSources)[number];
 export const digitalCategories = [
   'Design e Vídeo',
   'Marketing e Redes',
@@ -39,8 +47,7 @@ export function shouldUseRegionalSearch(category?: string | null) {
   return !isDigitalCategory(category);
 }
 
-export const freelancerBoosterCnpjPrice = 6.99;
-export const platformContactChannel = 'Chat interno' as const;
+export const platformContactChannel = 'Contato externo' as const;
 export type ContactChannel = typeof platformContactChannel;
 export const profileAssetKinds = ['avatar', 'banner'] as const;
 export type ProfileAssetKind = (typeof profileAssetKinds)[number];
@@ -61,7 +68,7 @@ export const freelancerPlanCatalog: Record<
     features: [
       'Perfil público listado na plataforma',
       'Painel com contatos e estatísticas',
-      'Fluxo de mensagem protegido',
+      'Perfil público com saída para contato',
     ],
   },
   booster: {
@@ -76,14 +83,7 @@ export const freelancerPlanCatalog: Record<
   },
 };
 
-export function getFreelancerPlanPrice(
-  tier: FreelancerPlanTier,
-  hasCnpj = false,
-): number {
-  if (tier === 'booster' && hasCnpj) {
-    return freelancerBoosterCnpjPrice;
-  }
-
+export function getFreelancerPlanPrice(tier: FreelancerPlanTier): number {
   return freelancerPlanCatalog[tier].priceMonthly;
 }
 
@@ -172,9 +172,50 @@ export interface AuthSessionPayload {
   user: SessionUser;
 }
 
+export interface EmailAvailabilityResponse {
+  exists: boolean;
+}
+
+export interface SignupAvailabilityResponse {
+  emailExists: boolean;
+  phoneExists: boolean;
+}
+
 export interface RegistrationResponse {
   user: SessionUser | null;
   requiresEmailConfirmation: boolean;
+}
+
+export interface PaymentCheckoutContext {
+  cnpjActive: boolean;
+  changeType: PaymentCheckoutChangeType;
+  source: SubscriptionFlowSource;
+}
+
+export interface PaymentCheckout {
+  id: string;
+  provider: PaymentProvider;
+  status: PaymentCheckoutStatus;
+  customerName: string;
+  customerEmail: string;
+  planTier: FreelancerPlanTier;
+  planName: string;
+  amountMonthly: number;
+  currency: 'BRL';
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  context?: PaymentCheckoutContext | null;
+}
+
+export interface PaymentCheckoutStartResponse {
+  checkout: PaymentCheckout;
+  checkoutPath: string;
+}
+
+export interface PaymentCheckoutDecisionResponse {
+  checkout: PaymentCheckout;
+  redirectPath: string;
 }
 
 export interface FreelancerDashboard {
@@ -189,8 +230,14 @@ export interface FreelancerDashboard {
   account: {
     email: string;
     phone: string;
-    hasCnpj: boolean;
   };
+}
+
+export interface FreelancerSubscriptionWorkspace {
+  profile: Pick<Freelancer, 'name' | 'profession' | 'subscriptionTier'>;
+  subscription: SubscriptionPlan;
+  activeCheckout: PaymentCheckout | null;
+  latestCheckout: PaymentCheckout | null;
 }
 
 export interface ClientDashboard {
@@ -202,6 +249,7 @@ export interface ClientDashboard {
 
 export interface ConversationInbox {
   contacts: ContactMessage[];
+  seenMessageIds: Record<string, string>;
 }
 
 export interface ApiEnvelope<T> {

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 deploy/
+server/data/
 .env
 .env.*
 !.env.example

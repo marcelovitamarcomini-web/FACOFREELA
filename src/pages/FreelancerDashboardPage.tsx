@@ -3,15 +3,14 @@ import { Link } from 'react-router-dom';
 
 import type { FreelancerDashboard } from '../../shared/contracts';
 import { StatsCard } from '../components/StatsCard';
-import { useChat } from '../context/ChatContext';
 import { useCepLookup } from '../hooks/useCepLookup';
 import { api } from '../lib/api';
+import { buildWhatsappUrl, countExternalContactChannels } from '../lib/external-contact';
 import { BRAZIL_STATES, OTHER_BRAZIL_CITY_OPTION } from '../lib/brazil-states';
-import { getConversationPeerName, getLatestMessage } from '../lib/chat';
-import { currencyMonthly, shortDate, shortDateTime } from '../lib/format';
+import { currencyMonthly, shortDate } from '../lib/format';
+import { getSubscriptionStatusLabel } from '../lib/subscription';
 
 export function FreelancerDashboardPage() {
-  const { contacts, notifications } = useChat();
   const [dashboard, setDashboard] = useState<FreelancerDashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [locationStatus, setLocationStatus] = useState<{
@@ -126,13 +125,12 @@ export function FreelancerDashboardPage() {
         text:
           saveError instanceof Error
             ? saveError.message
-            : 'N?o foi poss?vel salvar a localiza??o agora.',
+            : 'Não foi possível salvar a localização agora.',
       });
     } finally {
       setSavingLocation(false);
     }
   }
-
   if (error) {
     return (
       <div className="container py-14">
@@ -153,21 +151,30 @@ export function FreelancerDashboardPage() {
     );
   }
 
+  const whatsappUrl = buildWhatsappUrl(
+    dashboard.profile.whatsapp || dashboard.account.phone,
+    `Olá, encontrei seu perfil no Faço Freela e quero falar sobre um serviço com ${dashboard.profile.name.split(' ')[0]}.`,
+  );
+  const contactChannels = countExternalContactChannels({
+    whatsapp: dashboard.profile.whatsapp || dashboard.account.phone,
+    websiteUrl: dashboard.profile.websiteUrl,
+    linkedinUrl: dashboard.profile.linkedinUrl,
+  });
+
   return (
-    <div className="container space-y-10 py-14">
-      <section className="rounded-[36px] bg-slate-950 p-8 text-white shadow-soft">
-        <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
+    <div className="container space-y-8 py-10 sm:space-y-10 sm:py-12 lg:py-14">
+      <section className="rounded-[36px] bg-slate-950 p-5 text-white shadow-soft sm:p-8">
+        <div className="grid gap-8 xl:grid-cols-[1.2fr_0.8fr] xl:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-200">
               Dashboard do freelancer
             </p>
-            <h1 className="mt-4 text-4xl font-extrabold tracking-tight">
-              {dashboard.profile.name}, sua operação agora gira em torno do chat interno.
+            <h1 className="mt-4 text-[2.2rem] font-extrabold leading-[1.02] tracking-tight sm:text-[2.8rem]">
+              {dashboard.profile.name}, seu perfil agora empurra o primeiro contato para fora da plataforma.
             </h1>
             <p className="mt-4 max-w-3xl text-base leading-7 text-slate-300">
-              Os contatos entram pelo perfil público, as notificações sobem no rodapé e a thread
-              completa fica na central de mensagens. Nada de atalhos oficiais para fora da
-              plataforma.
+              A ideia é simples: o cliente entende seu serviço aqui e segue para WhatsApp, site ou
+              LinkedIn quando fizer sentido. Assim a plataforma fica mais leve sem perder contexto.
             </p>
           </div>
 
@@ -185,27 +192,59 @@ export function FreelancerDashboardPage() {
             </p>
             <p className="mt-2 text-sm text-slate-300">
               Renovação até {shortDate(dashboard.subscription.endsAt)} • status{' '}
-              <span className="font-semibold text-white">{dashboard.subscription.status}</span>
+              <span className="font-semibold text-white">
+                {getSubscriptionStatusLabel(dashboard.subscription.status)}
+              </span>
             </p>
+          </div>
+
+          <div
+            className={`rounded-[28px] p-5 text-white ${
+              dashboard.subscription.status === 'active'
+                ? 'border border-white/10 bg-white/5'
+                : 'border border-amber-200/40 bg-amber-50/10'
+            }`}
+          >
+            <p
+              className={`text-sm font-semibold ${
+                dashboard.subscription.status === 'active' ? 'text-brand-100' : 'text-amber-100'
+              }`}
+            >
+              {dashboard.subscription.status === 'active'
+                ? 'Sua assinatura está rodando normalmente.'
+                : 'Sua assinatura precisa de atenção.'}
+            </p>
+            <p className="mt-3 text-sm leading-6 text-slate-200">
+              A área de assinatura concentra plano atual, checkout em andamento e próximos passos sem
+              quebrar o estado real salvo no banco.
+            </p>
+            <div className="mt-4">
+              <Link
+                className="inline-flex min-h-[44px] items-center justify-center rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
+                to="/assinatura"
+              >
+                Abrir assinatura
+              </Link>
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-3">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 sm:gap-6">
         <StatsCard
           helper="Volume acumulado de visitas na página pública."
           label="Visualizações do perfil"
           value={dashboard.metrics.profileViews.toString()}
         />
         <StatsCard
-          helper="Leads iniciados dentro do fluxo protegido da plataforma."
-          label="Conversas iniciadas"
+          helper="Quantidade de leads antigos já registrados no perfil."
+          label="Leads registrados"
           value={dashboard.metrics.contactClicks.toString()}
         />
         <StatsCard
-          helper="Mensagens recebidas no chat interno."
-          label="Mensagens recebidas"
-          value={dashboard.metrics.messagesReceived.toString()}
+          helper="WhatsApp, site e LinkedIn publicados no perfil."
+          label="Canais externos"
+          value={contactChannels.toString()}
         />
       </section>
 
@@ -214,10 +253,10 @@ export function FreelancerDashboardPage() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-400">
-                Leads recentes
+                Canais do perfil
               </p>
               <h2 className="mt-2 text-2xl font-bold text-slate-950">
-                Conversas abertas no seu perfil
+                O que o cliente vê antes de chamar
               </h2>
             </div>
             <Link
@@ -229,40 +268,54 @@ export function FreelancerDashboardPage() {
           </div>
 
           <div className="mt-6 space-y-4">
-            {contacts.length > 0 ? (
-              contacts.slice(0, 4).map((contact) => {
-                const latestMessage = getLatestMessage(contact);
-
-                return (
-                  <Link
-                    key={contact.id}
-                    className="block rounded-[24px] border border-slate-200/80 bg-white/80 p-5 transition hover:border-cyan-300 hover:bg-cyan-50/50"
-                    to={`/mensagens?chat=${contact.id}`}
+            {contactChannels > 0 ? (
+              <>
+                {whatsappUrl ? (
+                  <a
+                    className="block rounded-[24px] border border-[#0071e3]/15 bg-[#0071e3]/5 p-5 transition hover:bg-[#0071e3]/10"
+                    href={whatsappUrl}
+                    rel="noreferrer"
+                    target="_blank"
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-950">
-                          {getConversationPeerName(contact, 'freelancer')}
-                        </p>
-                        <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
-                          {contact.subject}
-                        </p>
-                      </div>
-                      <span className="text-xs text-slate-400">
-                        {shortDateTime(latestMessage?.createdAt ?? contact.createdAt)}
-                      </span>
-                    </div>
-
-                    <p className="mt-4 line-clamp-2 text-sm leading-6 text-slate-600">
-                      {latestMessage?.body ?? contact.message}
+                    <p className="text-sm font-semibold text-slate-950">WhatsApp</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Canal mais direto para orçamento rápido e primeiro alinhamento.
                     </p>
-                  </Link>
-                );
-              })
+                  </a>
+                ) : null}
+
+                {dashboard.profile.websiteUrl ? (
+                  <a
+                    className="block rounded-[24px] border border-slate-200/80 bg-white/80 p-5 transition hover:border-cyan-300 hover:bg-cyan-50/50"
+                    href={dashboard.profile.websiteUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <p className="text-sm font-semibold text-slate-950">Site pessoal</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Bom para apresentar proposta, portfólio ou presença comercial.
+                    </p>
+                  </a>
+                ) : null}
+
+                {dashboard.profile.linkedinUrl ? (
+                  <a
+                    className="block rounded-[24px] border border-slate-200/80 bg-white/80 p-5 transition hover:border-cyan-300 hover:bg-cyan-50/50"
+                    href={dashboard.profile.linkedinUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <p className="text-sm font-semibold text-slate-950">LinkedIn</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Reforça experiência, histórico profissional e confiança.
+                    </p>
+                  </a>
+                ) : null}
+              </>
             ) : (
               <div className="rounded-[24px] border border-slate-200/80 bg-white/80 p-5 text-sm leading-6 text-slate-500">
-                Nenhum lead ainda. Quando um cliente iniciar conversa pelo seu perfil, o chat sobe
-                aqui e também na central completa.
+                Você ainda não publicou um canal externo claro no perfil. O WhatsApp costuma sair do
+                telefone cadastrado, mas vale revisar site e LinkedIn também.
               </div>
             )}
           </div>
@@ -270,51 +323,15 @@ export function FreelancerDashboardPage() {
 
         <div className="space-y-6">
           <article className="rounded-[32px] bg-slate-950 p-7 text-white shadow-soft">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-200">
-                  Respostas pendentes
-                </p>
-                <h2 className="mt-2 text-2xl font-bold">Central de mensagens</h2>
-              </div>
-              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-cyan-100">
-                {notifications.length} novas
-              </span>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              {notifications.length > 0 ? (
-                notifications.map((contact) => (
-                  <Link
-                    key={contact.id}
-                    className="block rounded-[24px] border border-white/10 bg-white/5 px-5 py-4 transition hover:bg-white/10"
-                    to={`/mensagens?chat=${contact.id}`}
-                  >
-                    <p className="text-sm font-semibold text-white">
-                      {getConversationPeerName(contact, 'freelancer')}
-                    </p>
-                    <p className="mt-1 text-xs uppercase tracking-[0.16em] text-cyan-200">
-                      {contact.subject}
-                    </p>
-                    <p className="mt-3 text-sm leading-6 text-slate-300">
-                      {getLatestMessage(contact)?.body ?? contact.message}
-                    </p>
-                  </Link>
-                ))
-              ) : (
-                <div className="rounded-[24px] border border-white/10 bg-white/5 px-5 py-4 text-sm leading-6 text-slate-300">
-                  Nenhuma resposta nova no momento. A dock do rodapé vai avisar assim que chegar
-                  mensagem de cliente.
-                </div>
-              )}
-            </div>
-
-            <Link
-              className="mt-5 inline-flex rounded-full bg-white px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-slate-100"
-              to="/mensagens"
-            >
-              Abrir central completa
-            </Link>
+            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-200">
+              Como esse fluxo funciona
+            </p>
+            <h2 className="mt-2 text-2xl font-bold">O perfil virou sua ponte para novos contatos</h2>
+            <ul className="mt-5 space-y-3 text-sm leading-6 text-slate-300">
+              <li>Cliente lê o perfil, entende o serviço e decide se vale chamar.</li>
+              <li>O primeiro contato sai para WhatsApp, site ou LinkedIn, sem abrir chat interno.</li>
+              <li>Seu foco aqui fica em apresentação, prova social e base de atendimento.</li>
+            </ul>
           </article>
 
           <article className="rounded-[32px] border border-slate-200/80 bg-white/90 p-7 shadow-soft">
@@ -508,12 +525,12 @@ export function FreelancerDashboardPage() {
 
           <article className="rounded-[32px] border border-brand-100 bg-brand-50 p-7 shadow-soft">
             <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-700">
-              Operação do chat
+              Operação do perfil
             </p>
             <ul className="mt-5 space-y-3 text-sm leading-6 text-slate-700">
-              <li>Todo contato oficial entra pelo perfil e continua no chat interno.</li>
-              <li>O rodapé mostra só notificações recebidas para não poluir a interface.</li>
-              <li>Se cliente e freelancer trocarem meios externos por conta própria dentro do chat, a plataforma não assume essa responsabilidade.</li>
+              <li>Seu perfil público agora é o ponto principal de captação de lead.</li>
+              <li>O primeiro contato externo reduz carga de banco e simplifica a operação.</li>
+              <li>Mantenha WhatsApp, site e LinkedIn coerentes com o tipo de serviço que você vende.</li>
             </ul>
           </article>
         </div>

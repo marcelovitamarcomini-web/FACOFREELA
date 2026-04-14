@@ -24,7 +24,7 @@ export function MyFreelancerProfileRedirectPage() {
           setError(
             loadError instanceof Error
               ? loadError.message
-              : 'N?o foi poss?vel abrir seu perfil p?blico.',
+              : 'Não foi possível abrir seu perfil público.',
           );
         }
       }
@@ -48,7 +48,7 @@ export function MyFreelancerProfileRedirectPage() {
   return (
     <div className="container py-14">
       <div className="glass-panel rounded-[30px] px-6 py-8 text-sm text-slate-500 shadow-soft">
-        Abrindo seu perfil p?blico...
+        Abrindo seu perfil público...
       </div>
     </div>
   );

@@ -45,7 +45,7 @@ export async function lookupCep(
   const cep = sanitizeCep(value);
 
   if (!isValidCep(cep)) {
-    throw new CepLookupError('invalid', 'Informe um CEP com 8 d?gitos.');
+    throw new CepLookupError('invalid', 'Informe um CEP com 8 dígitos.');
   }
 
   let response: Response;
@@ -63,21 +63,21 @@ export async function lookupCep(
 
     throw new CepLookupError(
       'unavailable',
-      'N?o foi poss?vel consultar o CEP agora. Tente novamente em instantes.',
+      'Não foi possível consultar o CEP agora. Tente novamente em instantes.',
     );
   }
 
   if (!response.ok) {
     throw new CepLookupError(
       'unavailable',
-      'N?o foi poss?vel consultar o CEP agora. Tente novamente em instantes.',
+      'Não foi possível consultar o CEP agora. Tente novamente em instantes.',
     );
   }
 
   const payload = (await response.json()) as ViaCepResponse;
 
   if (payload.erro) {
-    throw new CepLookupError('not_found', 'N?o encontramos esse CEP. Revise e tente de novo.');
+    throw new CepLookupError('not_found', 'Não encontramos esse CEP. Revise e tente de novo.');
   }
 
   const city = payload.localidade?.trim();
@@ -86,7 +86,7 @@ export async function lookupCep(
   if (!city || !state) {
     throw new CepLookupError(
       'unavailable',
-      'O ViaCEP n?o retornou cidade e estado para esse CEP.',
+      'O ViaCEP não retornou cidade e estado para esse CEP.',
     );
   }
 

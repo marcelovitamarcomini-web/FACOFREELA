@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import {
@@ -27,7 +27,6 @@ type FreelancerFormState = {
   ddd: string;
   phoneNumber: string;
   subscriptionTier: string;
-  hasCnpj: string;
   category: string;
   profession: string;
   summary: string;
@@ -44,7 +43,6 @@ const initialState: FreelancerFormState = {
   ddd: '',
   phoneNumber: '',
   subscriptionTier: 'normal',
-  hasCnpj: '',
   category: '',
   profession: '',
   summary: '',
@@ -56,7 +54,6 @@ const initialState: FreelancerFormState = {
 const freelancerPlanEntries = Object.entries(freelancerPlanCatalog) as Array<
   [FreelancerPlanTier, (typeof freelancerPlanCatalog)[FreelancerPlanTier]]
 >;
-const cnpjOptions = ['Sim', 'Não'] as const;
 const compactCategoryKeys = new Set([
   'conserto em casa',
   'obra e reforma',
@@ -83,7 +80,7 @@ function buildCompactFreelancerDescription(form: FreelancerFormState, city: stri
 
 export function FreelancerSignupPage() {
   const navigate = useNavigate();
-  const { setSession } = useAppSession();
+  const { loading: sessionLoading, session } = useAppSession();
   const [form, setForm] = useState<FreelancerFormState>(initialState);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<string | null>(null);
@@ -105,9 +102,18 @@ export function FreelancerSignupPage() {
     useCustomCityInput,
     manualCitySelectValue,
   } = useCepLookup();
-  const hasCnpj = form.hasCnpj === 'Sim';
-  const boosterBonusPrice = getFreelancerPlanPrice('booster', true);
   const usesCompactDescription = compactCategoryKeys.has(normalizeCategoryKey(form.category));
+
+  useEffect(() => {
+    if (sessionLoading || !session) {
+      return;
+    }
+
+    navigate(
+      session.role === 'freelancer' ? '/dashboard/freelancer' : '/dashboard/cliente',
+      { replace: true },
+    );
+  }, [navigate, session, sessionLoading]);
 
   function handleChange(
     event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -199,43 +205,52 @@ export function FreelancerSignupPage() {
     setLoading(true);
 
     try {
-      const response = await api.registerFreelancer({
+      const checkout = await api.createFreelancerCheckout({
         ...parsed.data,
         cep: cepValidation.value.cep,
       });
+      navigate(checkout.checkoutPath);
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error
+          ? submitError.message
+          : 'Não foi possível iniciar o checkout.';
 
-      if (response.user) {
-        setSession(response.user);
-        navigate('/dashboard/freelancer');
+      if (message.toLowerCase().includes('já existe uma conta com este e-mail')) {
+        setErrors({ email: message });
         return;
       }
 
-      navigate('/login', {
-        state: {
-          email: parsed.data.email,
-          registrationMessage: response.requiresEmailConfirmation
-            ? 'Perfil criado com sucesso. Confirme seu e-mail e depois faça login.'
-            : 'Perfil criado com sucesso. Faça login para continuar.',
-        },
-      });
-    } catch (submitError) {
-      setStatus(
-        submitError instanceof Error
-          ? submitError.message
-          : 'Não foi possível concluir o cadastro.',
-      );
+      if (message.toLowerCase().includes('já existe uma conta com este telefone')) {
+        setErrors({ phone: message });
+        return;
+      }
+
+      setStatus(message);
     } finally {
       setLoading(false);
     }
   }
 
+  if (sessionLoading || session) {
+    return (
+      <div className="container py-10 sm:py-12 lg:py-14">
+        <div className="glass-panel rounded-[30px] px-6 py-8 text-sm text-slate-500 shadow-soft">
+          {session
+            ? 'Você já está em uma conta ativa. Redirecionando para o seu painel...'
+            : 'Carregando cadastro...'}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="container grid gap-10 py-16 lg:grid-cols-[0.88fr_1.12fr]">
+    <div className="container grid gap-8 py-10 sm:gap-10 sm:py-12 xl:grid-cols-[0.8fr_1.2fr] xl:items-start xl:py-16">
       <section className="space-y-6">
         <span className="inline-flex rounded-full border border-slate-200 bg-white/88 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
           Perfil freelancer
         </span>
-        <h1 className="text-4xl font-semibold tracking-[-0.05em] text-slate-950 sm:text-5xl">
+        <h1 className="text-[2.35rem] font-semibold leading-[1.02] tracking-[-0.05em] text-slate-950 sm:text-[3rem] xl:text-[3.4rem]">
           Monte seu perfil para ser encontrado por clientes que precisam do seu serviço.
         </h1>
         <p className="max-w-xl text-[1.02rem] leading-7 text-slate-500">
@@ -243,20 +258,19 @@ export function FreelancerSignupPage() {
           estúdio ou online. Você cria a conta, escolhe o plano e publica seu perfil no mesmo fluxo.
         </p>
 
-        <div className="rounded-[34px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(246,249,255,0.96)_100%)] p-7 shadow-[0_20px_55px_rgba(15,23,42,0.05)]">
+        <div className="rounded-[34px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(246,249,255,0.96)_100%)] p-5 shadow-[0_20px_55px_rgba(15,23,42,0.05)] sm:p-7">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0071e3]">
               Planos freelancer
             </p>
             <h2 className="mt-3 text-2xl font-semibold tracking-[-0.03em] text-slate-950">
-              Escolha o ponto de entrada para publicar seu perfil.
+              Escolha entre os dois planos disponíveis para publicar seu perfil.
             </h2>
           </div>
 
           <div className="mt-5 grid gap-4">
             {freelancerPlanEntries.map(([tier, plan]) => {
-              const displayPrice = getFreelancerPlanPrice(tier, hasCnpj);
-              const hasCnpjBonus = hasCnpj && tier === 'booster';
+              const displayPrice = getFreelancerPlanPrice(tier);
 
               return (
                 <div
@@ -282,13 +296,6 @@ export function FreelancerSignupPage() {
                     <span className="text-base font-medium text-slate-500">/mês</span>
                   </p>
 
-                  {tier === 'booster' ? (
-                    <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0071e3]">
-                      {hasCnpjBonus
-                        ? 'Bônus CNPJ aplicado'
-                        : `Com CNPJ ativo: ${currencyMonthly(boosterBonusPrice)}/mês`}
-                    </p>
-                  ) : null}
                 </div>
               );
             })}
@@ -296,9 +303,9 @@ export function FreelancerSignupPage() {
         </div>
       </section>
 
-      <section className="glass-panel tech-panel rounded-[34px] p-6 lg:p-8">
+      <section className="glass-panel tech-panel rounded-[34px] p-5 sm:p-6 lg:p-8">
         <form className="grid gap-6" onSubmit={handleSubmit}>
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid gap-5 md:grid-cols-2">
             <FormField
               error={errors.name}
               label="Nome completo"
@@ -316,7 +323,7 @@ export function FreelancerSignupPage() {
             />
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid gap-5 md:grid-cols-2">
             <FormField
               error={errors.password}
               label="Senha"
@@ -335,20 +342,40 @@ export function FreelancerSignupPage() {
             />
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-[minmax(17rem,0.82fr)_minmax(0,1.18fr)] xl:items-start">
+          <div className="grid gap-5 2xl:grid-cols-[minmax(17rem,0.82fr)_minmax(0,1.18fr)] 2xl:items-start">
             <PhoneField
               dddValue={form.ddd}
               error={errors.phone}
               hint="Usamos esse número só para segurança da conta. O +55 entra automaticamente no sistema."
               label="Celular"
               numberValue={form.phoneNumber}
-              onDddChange={(value) => setForm((current) => ({ ...current, ddd: value }))}
-              onNumberChange={(value) =>
+              onDddChange={(value) => {
+                setForm((current) => ({ ...current, ddd: value }));
+                setErrors((current) => {
+                  if (!current.phone) {
+                    return current;
+                  }
+
+                  const nextErrors = { ...current };
+                  delete nextErrors.phone;
+                  return nextErrors;
+                });
+              }}
+              onNumberChange={(value) => {
                 setForm((current) => ({
                   ...current,
                   phoneNumber: value,
-                }))
-              }
+                }));
+                setErrors((current) => {
+                  if (!current.phone) {
+                    return current;
+                  }
+
+                  const nextErrors = { ...current };
+                  delete nextErrors.phone;
+                  return nextErrors;
+                });
+              }}
             />
 
             <div className="space-y-3">
@@ -363,7 +390,7 @@ export function FreelancerSignupPage() {
                       CEP
                     </span>
                     <input
-                      className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+                      className="mt-1 min-h-[44px] w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
                       inputMode="numeric"
                       maxLength={9}
                       onBlur={() => void resolveCep()}
@@ -389,7 +416,7 @@ export function FreelancerSignupPage() {
                             Estado
                           </span>
                           <select
-                            className="mt-1 w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                            className="mt-1 min-h-[44px] w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none"
                             onChange={(event) => {
                               clearLocationErrors(['state', 'city']);
                               void handleManualStateChange(event.target.value);
@@ -425,7 +452,7 @@ export function FreelancerSignupPage() {
                             Cidade
                           </span>
                           <select
-                            className="mt-1 w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none disabled:cursor-not-allowed disabled:text-slate-400"
+                            className="mt-1 min-h-[44px] w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none disabled:cursor-not-allowed disabled:text-slate-400"
                             disabled={!cepLocation.state || cityOptionsLoading}
                             onChange={(event) => {
                               clearLocationErrors(['city']);
@@ -470,7 +497,7 @@ export function FreelancerSignupPage() {
                           Digite a cidade
                         </span>
                         <input
-                          className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+                          className="mt-1 min-h-[44px] w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
                           onChange={(event) => {
                             clearLocationErrors(['city']);
                             handleCustomCityInput(event.target.value);
@@ -510,49 +537,7 @@ export function FreelancerSignupPage() {
             </div>
           </div>
 
-          <div className="space-y-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-700">Atende com CNPJ?</p>
-              <p className="mt-1 text-sm leading-6 text-slate-500">
-                Marque essa opção se o perfil vai atender com CNPJ ativo.
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2">
-              {cnpjOptions.map((option) => {
-                const isSelected = form.hasCnpj === option;
-
-                return (
-                  <button
-                    key={option}
-                    className={`rounded-[24px] border px-4 py-4 text-left transition ${
-                      isSelected
-                        ? 'border-[#0071e3]/30 bg-[#0071e3]/[0.06] shadow-[0_14px_36px_rgba(0,113,227,0.08)]'
-                        : 'border-slate-200/90 bg-white/80 hover:border-slate-300'
-                    }`}
-                    onClick={() =>
-                      setForm((current) => ({
-                        ...current,
-                        hasCnpj: option,
-                      }))
-                    }
-                    type="button"
-                  >
-                    <p className="text-sm font-semibold text-slate-950">{option}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                      {option === 'Sim'
-                        ? 'Conta configurada para operar como pessoa jurídica.'
-                        : 'Conta cadastrada sem CNPJ neste momento.'}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-
-            {errors.hasCnpj ? <p className="text-sm text-rose-600">{errors.hasCnpj}</p> : null}
-          </div>
-
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,0.94fr)_minmax(0,1.06fr)]">
+          <div className="grid gap-5 md:grid-cols-[minmax(0,0.94fr)_minmax(0,1.06fr)]">
             <FormField
               error={errors.category}
               label="Categoria principal"
@@ -615,7 +600,7 @@ export function FreelancerSignupPage() {
               </p>
             </div>
 
-            <div className="grid gap-5 xl:grid-cols-2">
+            <div className="grid gap-5 md:grid-cols-2">
               <FormField
                 error={errors.linkedinUrl}
                 label="LinkedIn"
@@ -646,15 +631,14 @@ export function FreelancerSignupPage() {
             <div>
               <p className="text-sm font-semibold text-slate-700">Selecione seu plano</p>
               <p className="mt-1 text-sm leading-6 text-slate-500">
-                O plano define a assinatura mensal logo na ativação do perfil.
+                O plano escolhido será usado no checkout assim que você concluir o cadastro.
               </p>
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
               {freelancerPlanEntries.map(([tier, plan]) => {
                 const isSelected = form.subscriptionTier === tier;
-                const displayPrice = getFreelancerPlanPrice(tier, hasCnpj);
-                const hasCnpjBonus = hasCnpj && tier === 'booster';
+                const displayPrice = getFreelancerPlanPrice(tier);
 
                 return (
                   <button
@@ -693,14 +677,6 @@ export function FreelancerSignupPage() {
                       <span className="text-sm font-medium text-slate-500">/mês</span>
                     </p>
 
-                    {tier === 'booster' ? (
-                      <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#0071e3]">
-                        {hasCnpjBonus
-                          ? 'Bônus CNPJ aplicado'
-                          : `Com CNPJ ativo: ${currencyMonthly(boosterBonusPrice)}/mês`}
-                      </p>
-                    ) : null}
-
                     <ul className="mt-4 space-y-2">
                       {plan.features.map((feature) => (
                         <li key={feature} className="text-sm leading-6 text-slate-600">
@@ -729,13 +705,13 @@ export function FreelancerSignupPage() {
             disabled={loading || cepLoading || (showManualLocationFields && cityOptionsLoading)}
             type="submit"
           >
-            {loading ? 'Criando perfil...' : 'Criar perfil e ativar plano'}
+            {loading ? 'Preparando checkout...' : 'Continuar para pagamento'}
           </button>
         </form>
 
-        <p className="mt-6 text-sm text-slate-500">
+        <p className="mt-6 flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:flex-wrap sm:items-center">
           Já possui conta?{' '}
-          <Link className="font-semibold text-[#0071e3]" to="/login">
+          <Link className="inline-flex min-h-[44px] items-center rounded-full px-3 font-semibold text-[#0071e3] transition hover:bg-[#0071e3]/6" to="/login">
             Fazer login
           </Link>
         </p>

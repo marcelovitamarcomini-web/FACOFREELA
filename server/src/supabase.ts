@@ -29,7 +29,12 @@ type SupabaseAuthResult =
   | {
       ok: false;
       message: string;
-      reason: 'already_registered' | 'invalid_credentials' | 'not_configured' | 'unknown';
+      reason:
+        | 'already_registered'
+        | 'duplicate_phone'
+        | 'invalid_credentials'
+        | 'not_configured'
+        | 'unknown';
     };
 
 type SupabaseStorageUploadResult =
@@ -86,12 +91,33 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+function normalizePhoneDigits(value?: string | null): string | null {
+  const normalized = value?.replace(/\D/g, '') ?? '';
+  return normalized ? normalized : null;
+}
+
 function isAlreadyRegisteredMessage(message: string): boolean {
   const normalizedMessage = message.toLowerCase();
   return (
+    normalizedMessage.includes('ja existe uma conta com este e-mail') ||
+    normalizedMessage.includes('já existe uma conta com este e-mail') ||
+    normalizedMessage.includes('ja existe uma conta de autenticacao com este e-mail') ||
+    normalizedMessage.includes('já existe uma conta de autenticação com este e-mail') ||
     normalizedMessage.includes('already registered') ||
     normalizedMessage.includes('already been registered') ||
     normalizedMessage.includes('user already exists')
+  );
+}
+
+function isDuplicatePhoneMessage(message: string): boolean {
+  const normalizedMessage = message.toLowerCase();
+  return (
+    normalizedMessage.includes('ja existe uma conta com este telefone') ||
+    normalizedMessage.includes('já existe uma conta com este telefone') ||
+    normalizedMessage.includes('ja existe uma conta de autenticacao com este telefone') ||
+    normalizedMessage.includes('já existe uma conta de autenticação com este telefone') ||
+    normalizedMessage.includes('auth_users_phone_normalized_key') ||
+    (normalizedMessage.includes('duplicate key') && normalizedMessage.includes('phone'))
   );
 }
 
@@ -126,6 +152,32 @@ function readSupabaseMetadataValue(
 function readSupabaseUserRole(metadata: unknown): UserRole | null {
   const value = readSupabaseMetadataValue(metadata, ['user_type', 'role']);
   return value === 'client' || value === 'freelancer' ? value : null;
+}
+
+function isObfuscatedExistingSignupUser(
+  user: { app_metadata?: unknown; email?: string | null; identities?: unknown } | null | undefined,
+  expectedEmail: string,
+): boolean {
+  if (!user) {
+    return false;
+  }
+
+  const normalizedExpectedEmail = expectedEmail.trim().toLowerCase();
+  const normalizedUserEmail = user.email?.trim().toLowerCase() ?? '';
+  const appMetadata =
+    user.app_metadata && typeof user.app_metadata === 'object'
+      ? (user.app_metadata as Record<string, unknown>)
+      : {};
+  const provider = typeof appMetadata.provider === 'string' ? appMetadata.provider : undefined;
+  const providers = Array.isArray(appMetadata.providers)
+    ? appMetadata.providers.filter((value): value is string => typeof value === 'string')
+    : [];
+  const identityCount = Array.isArray(user.identities) ? user.identities.length : 0;
+
+  return (
+    normalizedUserEmail !== normalizedExpectedEmail ||
+    (identityCount === 0 && provider !== 'email' && !providers.includes('email'))
+  );
 }
 
 function inferProfileAssetExtension(file: File): string | null {
@@ -249,8 +301,61 @@ export function createSupabaseUserClient(accessToken: string) {
   });
 }
 
+export async function deleteSupabaseAuthUser(userId: string): Promise<boolean> {
+  if (!supabaseServerReadClient) {
+    return false;
+  }
+
+  const { error } = await supabaseServerReadClient.auth.admin.deleteUser(userId);
+  return !error;
+}
+
+export async function checkAuthEmailExists(email: string): Promise<boolean | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) {
+    return false;
+  }
+
+  const client = supabaseServerReadClient;
+  if (!client) {
+    return null;
+  }
+
+  const { data, error } = await client.rpc('auth_email_exists', {
+    target_email: normalizedEmail,
+  });
+
+  if (error) {
+    return null;
+  }
+
+  return data === true;
+}
+
+export async function checkAuthPhoneExists(phone: string): Promise<boolean | null> {
+  const normalizedPhone = normalizePhoneDigits(phone);
+  if (!normalizedPhone) {
+    return false;
+  }
+
+  const client = supabaseServerReadClient;
+  if (!client) {
+    return null;
+  }
+
+  const { data, error } = await client.rpc('auth_phone_exists', {
+    target_phone: normalizedPhone,
+  });
+
+  if (error) {
+    return null;
+  }
+
+  return data === true;
+}
+
 function getSupabaseStorageClient(accessToken: string) {
-  return supabaseServerReadClient ?? createSupabaseUserClient(accessToken);
+  return createSupabaseUserClient(accessToken) ?? supabaseServerReadClient;
 }
 
 export async function uploadSupabaseProfileAsset(input: {
@@ -379,6 +484,14 @@ export async function registerSupabaseUser(input: {
     },
   });
 
+  if (!error && isObfuscatedExistingSignupUser(data.user, input.email) && !data.session) {
+    return {
+      ok: false,
+      message: 'Já existe uma conta de autenticação com este e-mail.',
+      reason: 'already_registered',
+    };
+  }
+
   if (!error) {
     return createSuccessResult(data);
   }
@@ -389,6 +502,14 @@ export async function registerSupabaseUser(input: {
       ok: false,
       message: 'Já existe uma conta de autenticação com este e-mail.',
       reason: 'already_registered',
+    };
+  }
+
+  if (isDuplicatePhoneMessage(message)) {
+    return {
+      ok: false,
+      message: 'JÃ¡ existe uma conta de autenticaÃ§Ã£o com este telefone.',
+      reason: 'duplicate_phone',
     };
   }
 

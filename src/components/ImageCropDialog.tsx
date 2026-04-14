@@ -54,7 +54,7 @@ export function ImageCropDialog({
     setOffsetY(0);
     setError(null);
     void readImageDimensions(file).then(setDimensions).catch((loadError) => {
-      setError(loadError instanceof Error ? loadError.message : 'N?o foi poss?vel abrir a imagem.');
+      setError(loadError instanceof Error ? loadError.message : 'Não foi possível abrir a imagem.');
     });
 
     return () => URL.revokeObjectURL(objectUrl);
@@ -139,7 +139,7 @@ export function ImageCropDialog({
       });
       await onConfirm(editedFile);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'N?o foi poss?vel editar a imagem.');
+      setError(saveError instanceof Error ? saveError.message : 'Não foi possível editar a imagem.');
     } finally {
       setSubmitting(false);
     }
@@ -266,7 +266,7 @@ export function ImageCropDialog({
             <div className="rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
               <p>Ideal: {guideline.recommendedSize}</p>
               <p className="mt-1">
-                Minimo: {guideline.minimumWidth} x {guideline.minimumHeight} px. Maximo de arquivo:{' '}
+                Mínimo: {guideline.minimumWidth} x {guideline.minimumHeight} px. Máximo de arquivo:{' '}
                 {guideline.maximumFileSizeLabel}.
               </p>
             </div>

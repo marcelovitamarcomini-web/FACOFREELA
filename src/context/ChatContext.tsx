@@ -25,56 +25,6 @@ interface ChatContextValue {
 
 const ChatContext = createContext<ChatContextValue | undefined>(undefined);
 
-function getSeenStorageKey(userId: string) {
-  return `facofreela.chat-seen.v2.${userId}`;
-}
-
-function clearLegacySeenStorage(userId: string) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const keysToRemove: string[] = [];
-  const currentKey = getSeenStorageKey(userId);
-
-  for (let index = 0; index < window.localStorage.length; index += 1) {
-    const key = window.localStorage.key(index);
-    if (key?.startsWith('facofreela.chat-seen.') && key !== currentKey) {
-      keysToRemove.push(key);
-    }
-  }
-
-  keysToRemove.forEach((key) => {
-    window.localStorage.removeItem(key);
-  });
-}
-
-function readSeenMap(userId: string): SeenMap {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(getSeenStorageKey(userId));
-    if (!rawValue) {
-      return {};
-    }
-
-    const parsed = JSON.parse(rawValue) as SeenMap;
-    return typeof parsed === 'object' && parsed ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeSeenMap(userId: string, value: SeenMap) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.localStorage.setItem(getSeenStorageKey(userId), JSON.stringify(value));
-}
-
 function orderContacts(contacts: ContactMessage[]) {
   return [...contacts].sort(sortContactsByLatest);
 }
@@ -108,6 +58,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       const nextContacts = orderContacts(response.contacts);
 
       setContacts(nextContacts);
+      setSeenByContact(response.seenMessageIds);
       setError(null);
       setActiveChatId((current) => {
         if (current && nextContacts.some((contact) => contact.id === current)) {
@@ -150,9 +101,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    clearLegacySeenStorage(session.id);
-    setSeenByContact(readSeenMap(session.id));
-
     void refresh();
 
     const intervalId = window.setInterval(() => {
@@ -164,28 +112,32 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     };
   }, [session, sessionLoading]);
 
-  useEffect(() => {
-    if (!session) {
+  function markAsRead(contactId: string) {
+    const contact = contacts.find((item) => item.id === contactId);
+    const latestMessage = contact ? getLatestMessage(contact) : null;
+
+    if (!latestMessage) {
       return;
     }
 
-    writeSeenMap(session.id, seenByContact);
-  }, [seenByContact, session]);
-
-  function markAsRead(contactId: string) {
+    let shouldPersist = false;
     setSeenByContact((current) => {
-      const contact = contacts.find((item) => item.id === contactId);
-      const latestMessage = contact ? getLatestMessage(contact) : null;
-
-      if (!latestMessage || current[contactId] === latestMessage.id) {
+      if (current[contactId] === latestMessage.id) {
         return current;
       }
 
+      shouldPersist = true;
       return {
         ...current,
         [contactId]: latestMessage.id,
       };
     });
+
+    if (shouldPersist) {
+      void api.markContactAsRead(contactId, latestMessage.id).catch(() => {
+        return undefined;
+      });
+    }
   }
 
   function selectChat(contactId: string) {

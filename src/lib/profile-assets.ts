@@ -68,7 +68,7 @@ export async function readImageDimensions(file: File): Promise<{ height: number;
 
     image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      reject(new Error('N?o foi poss?vel ler as dimens?es da imagem enviada.'));
+      reject(new Error('Não foi possível ler as dimensões da imagem enviada.'));
     };
 
     image.src = objectUrl;
@@ -87,7 +87,7 @@ async function loadImageElement(file: File): Promise<HTMLImageElement> {
 
     image.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      reject(new Error('N?o foi poss?vel carregar a imagem para edi??o.'));
+      reject(new Error('Não foi possível carregar a imagem para edição.'));
     };
 
     image.src = objectUrl;
@@ -155,7 +155,7 @@ export async function cropProfileAssetFile(input: {
   const context = canvas.getContext('2d');
 
   if (!context) {
-    throw new Error('N?o foi poss?vel preparar a imagem para envio.');
+    throw new Error('Não foi possível preparar a imagem para envio.');
   }
 
   context.imageSmoothingEnabled = true;
@@ -178,7 +178,7 @@ export async function cropProfileAssetFile(input: {
   });
 
   if (!blob) {
-    throw new Error('N?o foi poss?vel finalizar a imagem editada.');
+    throw new Error('Não foi possível finalizar a imagem editada.');
   }
 
   return new File([blob], `${input.kind}.${output.extension}`, {

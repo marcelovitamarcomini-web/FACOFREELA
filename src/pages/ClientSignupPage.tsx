@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { clientSignupSchema } from '../../shared/schemas';
@@ -36,7 +36,7 @@ const initialState: ClientFormState = {
 
 export function ClientSignupPage() {
   const navigate = useNavigate();
-  const { setSession } = useAppSession();
+  const { loading: sessionLoading, session, setSession } = useAppSession();
   const [form, setForm] = useState<ClientFormState>(initialState);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<string | null>(null);
@@ -58,6 +58,17 @@ export function ClientSignupPage() {
     useCustomCityInput,
     manualCitySelectValue,
   } = useCepLookup();
+
+  useEffect(() => {
+    if (sessionLoading || !session) {
+      return;
+    }
+
+    navigate(
+      session.role === 'freelancer' ? '/dashboard/freelancer' : '/dashboard/cliente',
+      { replace: true },
+    );
+  }, [navigate, session, sessionLoading]);
 
   function handleChange(
     event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -150,43 +161,66 @@ export function ClientSignupPage() {
         },
       });
     } catch (submitError) {
-      setStatus(
-        submitError instanceof Error ? submitError.message : 'Não foi possível criar a conta.',
-      );
+      const message =
+        submitError instanceof Error ? submitError.message : 'Não foi possível criar a conta.';
+
+      if (message.toLowerCase().includes('já existe uma conta com este e-mail')) {
+        setErrors({ email: message });
+        return;
+      }
+
+      if (message.toLowerCase().includes('já existe uma conta com este telefone')) {
+        setErrors({ phone: message });
+        return;
+      }
+
+      setStatus(message);
     } finally {
       setLoading(false);
     }
   }
 
+  if (sessionLoading || session) {
+    return (
+      <div className="container py-10 sm:py-12 lg:py-14">
+        <div className="glass-panel rounded-[30px] px-6 py-8 text-sm text-slate-500 shadow-soft">
+          {session
+            ? 'Você já está em uma conta ativa. Redirecionando para o seu painel...'
+            : 'Carregando cadastro...'}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="container grid gap-10 py-16 lg:grid-cols-[0.88fr_1.12fr]">
+    <div className="container grid gap-8 py-10 sm:gap-10 sm:py-12 xl:grid-cols-[0.82fr_1.18fr] xl:items-start xl:py-16">
       <section className="space-y-6">
         <span className="inline-flex rounded-full border border-slate-200 bg-white/88 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
           Conta de cliente
         </span>
-        <h1 className="text-4xl font-semibold tracking-[-0.05em] text-slate-950 sm:text-5xl">
-          Crie sua conta para achar profissionais, comparar opções e conversar sem sair do site.
+        <h1 className="text-[2.35rem] font-semibold leading-[1.02] tracking-[-0.05em] text-slate-950 sm:text-[3rem] xl:text-[3.4rem]">
+          Crie sua conta para achar profissionais, comparar opções e organizar melhor sua busca.
         </h1>
         <p className="max-w-xl text-[1.02rem] leading-7 text-slate-500">
-          O cadastro é simples e gratuito. Depois do login, você inicia conversas pelo chat
-          interno e acompanha tudo com mais organização.
+          O cadastro é simples e gratuito. Depois do login, você salva sua base de atendimento e
+          navega com mais contexto antes de seguir para o contato externo.
         </p>
 
-        <div className="rounded-[34px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(246,249,255,0.96)_100%)] p-7 shadow-[0_20px_55px_rgba(15,23,42,0.05)]">
+        <div className="rounded-[34px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(246,249,255,0.96)_100%)] p-5 shadow-[0_20px_55px_rgba(15,23,42,0.05)] sm:p-7">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0071e3]">
             O que entra na conta
           </p>
           <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
             <li>Comparar profissionais com mais clareza e sem se perder no processo.</li>
-            <li>Conversar pelo chat interno e manter o histórico no mesmo lugar.</li>
+            <li>Abrir perfis com contexto e seguir para o contato externo quando fizer sentido.</li>
             <li>Entrar na busca já com sua região principal pronta para categorias locais.</li>
           </ul>
         </div>
       </section>
 
-      <section className="glass-panel tech-panel rounded-[34px] p-6 lg:p-8">
+      <section className="glass-panel tech-panel rounded-[34px] p-5 sm:p-6 lg:p-8">
         <form className="grid gap-6" onSubmit={handleSubmit}>
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid gap-5 md:grid-cols-2">
             <FormField
               error={errors.name}
               label="Nome completo"
@@ -206,7 +240,7 @@ export function ClientSignupPage() {
             />
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-2">
+          <div className="grid gap-5 md:grid-cols-2">
             <FormField
               error={errors.password}
               label="Senha"
@@ -227,20 +261,40 @@ export function ClientSignupPage() {
             />
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] xl:items-stretch">
+          <div className="grid gap-5 2xl:grid-cols-[minmax(17rem,0.82fr)_minmax(0,1.18fr)] 2xl:items-stretch">
             <PhoneField
               dddValue={form.ddd}
               error={errors.phone}
               hint="Usamos esse número só para segurança da conta. O +55 entra automaticamente no sistema."
               label="Celular"
               numberValue={form.phoneNumber}
-              onDddChange={(value) => setForm((current) => ({ ...current, ddd: value }))}
-              onNumberChange={(value) =>
+              onDddChange={(value) => {
+                setForm((current) => ({ ...current, ddd: value }));
+                setErrors((current) => {
+                  if (!current.phone) {
+                    return current;
+                  }
+
+                  const nextErrors = { ...current };
+                  delete nextErrors.phone;
+                  return nextErrors;
+                });
+              }}
+              onNumberChange={(value) => {
                 setForm((current) => ({
                   ...current,
                   phoneNumber: value,
-                }))
-              }
+                }));
+                setErrors((current) => {
+                  if (!current.phone) {
+                    return current;
+                  }
+
+                  const nextErrors = { ...current };
+                  delete nextErrors.phone;
+                  return nextErrors;
+                });
+              }}
             />
 
             <div className="space-y-3">
@@ -255,7 +309,7 @@ export function ClientSignupPage() {
                       CEP
                     </span>
                     <input
-                      className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+                      className="mt-1 min-h-[44px] w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
                       inputMode="numeric"
                       maxLength={9}
                       onBlur={() => void resolveCep()}
@@ -281,7 +335,7 @@ export function ClientSignupPage() {
                             Estado
                           </span>
                           <select
-                            className="mt-1 w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none"
+                            className="mt-1 min-h-[44px] w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none"
                             onChange={(event) => {
                               clearLocationErrors(['state', 'city']);
                               void handleManualStateChange(event.target.value);
@@ -317,7 +371,7 @@ export function ClientSignupPage() {
                             Cidade
                           </span>
                           <select
-                            className="mt-1 w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none disabled:cursor-not-allowed disabled:text-slate-400"
+                            className="mt-1 min-h-[44px] w-full appearance-none bg-transparent text-sm font-semibold text-slate-900 outline-none disabled:cursor-not-allowed disabled:text-slate-400"
                             disabled={!cepLocation.state || cityOptionsLoading}
                             onChange={(event) => {
                               clearLocationErrors(['city']);
@@ -362,7 +416,7 @@ export function ClientSignupPage() {
                           Digite a cidade
                         </span>
                         <input
-                          className="mt-1 w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
+                          className="mt-1 min-h-[44px] w-full bg-transparent text-sm font-semibold text-slate-900 outline-none placeholder:text-slate-400"
                           onChange={(event) => {
                             clearLocationErrors(['city']);
                             handleCustomCityInput(event.target.value);
@@ -416,9 +470,9 @@ export function ClientSignupPage() {
           </button>
         </form>
 
-        <p className="mt-6 text-sm text-slate-500">
+        <p className="mt-6 flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:flex-wrap sm:items-center">
           Já tem conta?{' '}
-          <Link className="font-semibold text-[#0071e3]" to="/login">
+          <Link className="inline-flex min-h-[44px] items-center rounded-full px-3 font-semibold text-[#0071e3] transition hover:bg-[#0071e3]/6" to="/login">
             Fazer login
           </Link>
         </p>

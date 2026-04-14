@@ -3,7 +3,7 @@
 
 :root {
   color-scheme: light;
-  --bg: #f5f5f7;
+  --bg: #f1f6fb;
   --surface: rgba(255, 255, 255, 0.96);
   --surface-strong: rgba(255, 255, 255, 0.98);
   --border: rgba(15, 23, 42, 0.07);
@@ -19,7 +19,10 @@ body {
   position: relative;
   margin: 0;
   min-width: 320px;
-  background: #f5f5f7;
+  background:
+    radial-gradient(circle at top, rgba(96, 165, 250, 0.15), transparent 26%),
+    radial-gradient(circle at right 12%, rgba(191, 219, 254, 0.24), transparent 22%),
+    linear-gradient(180deg, #fbfdff 0%, #f4f8fd 42%, #eef3f9 100%);
   color: var(--text);
   font-family: 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', 'Arial Nova', 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -73,15 +76,15 @@ textarea {
 }
 
 .panel-outline {
-  background: var(--surface-strong);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(247, 250, 255, 0.96) 100%);
   border: 1px solid rgba(15, 23, 42, 0.06);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.055);
 }
 
 .section-shell {
-  border: 1px solid rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.995) 0%, rgba(246, 250, 255, 0.98) 68%, rgba(242, 247, 255, 0.95) 100%);
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.06);
 }
 
 .hero-display-title {
@@ -116,4 +119,64 @@ textarea {
 
 .mesh-panel::before {
   content: none;
+}
+
+.ff-card-lift {
+  transition:
+    transform 220ms ease,
+    box-shadow 220ms ease,
+    border-color 220ms ease;
+}
+
+.ff-card-lift:hover {
+  transform: translate3d(0, -2px, 0);
+  box-shadow: 0 22px 52px rgba(15, 23, 42, 0.08);
+}
+
+.ff-fade-up {
+  animation: ff-fade-up 0.7s ease-out both;
+}
+
+.ff-delay-1 {
+  animation-delay: 0.12s;
+}
+
+.ff-delay-2 {
+  animation-delay: 0.22s;
+}
+
+.ff-float-soft {
+  animation: ff-float-soft 5.6s ease-in-out infinite;
+}
+
+@keyframes ff-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes ff-float-soft {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(0, -5px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ff-fade-up,
+  .ff-delay-1,
+  .ff-delay-2,
+  .ff-float-soft {
+    animation: none;
+  }
 }

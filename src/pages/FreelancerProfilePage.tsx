@@ -1,29 +1,15 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { Link, useParams } from 'react-router-dom';
 
 import type { Freelancer } from '../../shared/contracts';
 import { FreelancerVerifiedSeal } from '../components/FreelancerVerifiedSeal';
 import { ImageCropDialog } from '../components/ImageCropDialog';
-import { contactSchema } from '../../shared/schemas';
-import { FormField } from '../components/FormField';
 import { SectionHeading } from '../components/SectionHeading';
-import { useChat } from '../context/ChatContext';
 import { useAppSession } from '../context/AppSessionContext';
 import { api } from '../lib/api';
-import { handleDesktopEnterSubmit } from '../lib/desktop-submit';
+import { buildWhatsappUrl } from '../lib/external-contact';
 import { shortDate } from '../lib/format';
 import { acceptedImageTypes, profileAssetGuidelines, readImageDimensions } from '../lib/profile-assets';
-import { getFieldErrors } from '../lib/validation';
-
-type ContactFormState = {
-  subject: string;
-  message: string;
-};
-
-const initialContactForm: ContactFormState = {
-  subject: '',
-  message: '',
-};
 
 function CameraButton({
   disabled,
@@ -60,22 +46,18 @@ function CameraButton({
   );
 }
 
+function buildFreelancerIntro(name: string) {
+  const firstName = name.trim().split(' ')[0] ?? 'você';
+  return `Olá, encontrei seu perfil no Faço Freela e quero falar sobre um serviço com ${firstName}.`;
+}
+
 export function FreelancerProfilePage() {
   const { slug } = useParams();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { refresh } = useChat();
   const { session } = useAppSession();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const bannerInputRef = useRef<HTMLInputElement | null>(null);
   const [freelancer, setFreelancer] = useState<Freelancer | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [contactForm, setContactForm] = useState<ContactFormState>(initialContactForm);
-  const [contactErrors, setContactErrors] = useState<Record<string, string>>({});
-  const [contactStatus, setContactStatus] = useState<{ tone: 'error' | 'success'; text: string } | null>(
-    null,
-  );
-  const [submittingContact, setSubmittingContact] = useState(false);
   const [mediaStatus, setMediaStatus] = useState<{ tone: 'error' | 'success'; text: string } | null>(
     null,
   );
@@ -117,65 +99,6 @@ export function FreelancerProfilePage() {
     return () => controller.abort();
   }, [slug]);
 
-  function handleContactChange(
-    event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
-  ) {
-    const { name, value } = event.target;
-    setContactForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  }
-
-  async function handleContactSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!freelancer) {
-      return;
-    }
-
-    setContactStatus(null);
-
-    const parsed = contactSchema.safeParse({
-      freelancerId: freelancer.id,
-      freelancerName: freelancer.name,
-      ...contactForm,
-    });
-
-    if (!parsed.success) {
-      setContactErrors(getFieldErrors(parsed.error));
-      return;
-    }
-
-    setContactErrors({});
-    setSubmittingContact(true);
-
-    try {
-      const createdContact = await api.createContact(parsed.data);
-      setContactForm(initialContactForm);
-      setContactStatus({
-        tone: 'success',
-        text: 'Conversa atualizada. O histórico segue na central de mensagens.',
-      });
-      await refresh();
-      navigate(`/mensagens?chat=${createdContact.id}`);
-    } catch (submitError) {
-      setContactStatus({
-        tone: 'error',
-        text:
-          submitError instanceof Error
-            ? submitError.message
-            : 'Não foi possível enviar sua mensagem agora.',
-      });
-    } finally {
-      setSubmittingContact(false);
-    }
-  }
-
-  function handleContactMessageKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    handleDesktopEnterSubmit(event);
-  }
-
   async function validateProfileAssetFile(kind: 'avatar' | 'banner', file: File) {
     const guideline = profileAssetGuidelines[kind];
     const dimensions = await readImageDimensions(file);
@@ -186,13 +109,13 @@ export function FreelancerProfilePage() {
     ) {
       throw new Error(
         kind === 'avatar'
-          ? `A foto precisa ter pelo menos ${guideline.minimumWidth} x ${guideline.minimumHeight} px. O ideal e ${guideline.recommendedSize}.`
-          : `O banner precisa ter pelo menos ${guideline.minimumWidth} x ${guideline.minimumHeight} px. O ideal e ${guideline.recommendedSize}.`,
+          ? `A foto precisa ter pelo menos ${guideline.minimumWidth} x ${guideline.minimumHeight} px. O ideal é ${guideline.recommendedSize}.`
+          : `O banner precisa ter pelo menos ${guideline.minimumWidth} x ${guideline.minimumHeight} px. O ideal é ${guideline.recommendedSize}.`,
       );
     }
 
     if (kind === 'banner' && dimensions.width / dimensions.height < 2.2) {
-      throw new Error('Use um banner horizontal. O ideal e 1500 x 500 px.');
+      throw new Error('Use um banner horizontal. O ideal é 1500 x 500 px.');
     }
   }
 
@@ -230,7 +153,7 @@ export function FreelancerProfilePage() {
       const message =
         uploadError instanceof Error
           ? uploadError.message
-          : 'N?o foi poss?vel concluir o upload da imagem.';
+          : 'Não foi possível concluir o upload da imagem.';
       setMediaStatus({
         tone: 'error',
         text: message,
@@ -266,7 +189,7 @@ export function FreelancerProfilePage() {
         text:
           selectionError instanceof Error
             ? selectionError.message
-            : 'N?o foi poss?vel preparar a imagem para edi??o.',
+            : 'Não foi possível preparar a imagem para edição.',
       });
     }
   }
@@ -282,7 +205,7 @@ export function FreelancerProfilePage() {
 
   if (error) {
     return (
-      <div className="container py-14">
+      <div className="container py-10 sm:py-12 lg:py-14">
         <div className="rounded-[30px] border border-rose-200 bg-rose-50 px-6 py-5 text-sm text-rose-700">
           {error}
         </div>
@@ -292,7 +215,7 @@ export function FreelancerProfilePage() {
 
   if (!freelancer) {
     return (
-      <div className="container py-14">
+      <div className="container py-10 sm:py-12 lg:py-14">
         <div className="glass-panel rounded-[30px] px-6 py-8 text-sm text-slate-500 shadow-soft">
           Carregando perfil profissional...
         </div>
@@ -300,22 +223,57 @@ export function FreelancerProfilePage() {
     );
   }
 
-  const isClient = session?.role === 'client';
   const isOwner = session?.role === 'freelancer' && session.id === freelancer.id;
   const hasVerificationSeal = freelancer.subscriptionTier === 'booster';
   const firstName = freelancer.name.split(' ')[0];
+  const whatsappUrl = buildWhatsappUrl(freelancer.whatsapp, buildFreelancerIntro(freelancer.name));
+  const externalChannels = [
+    whatsappUrl
+      ? {
+          href: whatsappUrl,
+          label: 'Abrir WhatsApp',
+          helper: 'Contato rápido e direto.',
+          tone: 'primary' as const,
+        }
+      : null,
+    freelancer.websiteUrl
+      ? {
+          href: freelancer.websiteUrl,
+          label: 'Visitar site',
+          helper: 'Portfólio, proposta ou página profissional.',
+          tone: 'secondary' as const,
+        }
+      : null,
+    freelancer.linkedinUrl
+      ? {
+          href: freelancer.linkedinUrl,
+          label: 'Ver LinkedIn',
+          helper: 'Perfil profissional e experiência.',
+          tone: 'secondary' as const,
+        }
+      : null,
+  ].filter(
+    (
+      channel,
+    ): channel is {
+      href: string;
+      label: string;
+      helper: string;
+      tone: 'primary' | 'secondary';
+    } => Boolean(channel),
+  );
   const trustPoints = [
     {
       title: 'Portfólio visível',
       description: 'Veja trabalhos e referências antes de entrar em contato.',
     },
     {
-      title: 'Contato protegido na plataforma',
-      description: 'A negociação começa com mais contexto e sem atalhos confusos.',
+      title: 'Contato externo pronto',
+      description: 'O perfil já aponta para WhatsApp, site ou outros canais quando fizer sentido.',
     },
     {
-      title: 'Atendimento mais organizado',
-      description: 'Cliente e freelancer continuam a conversa no mesmo fluxo do site.',
+      title: 'Menos peso no sistema',
+      description: 'O primeiro contato sai do site sem perder o contexto do perfil.',
     },
   ];
   const bannerStyle = freelancer.bannerUrl
@@ -327,10 +285,10 @@ export function FreelancerProfilePage() {
     : undefined;
 
   return (
-    <div className="container py-14">
+    <div className="container py-10 sm:py-12 lg:py-14">
       <section className="overflow-hidden rounded-[36px] border border-white/70 bg-white shadow-[0_18px_48px_rgba(15,23,42,0.06)]">
         <div
-          className="relative z-0 aspect-[3/1] overflow-hidden bg-slate-100"
+          className="relative z-0 aspect-[16/7] overflow-hidden bg-slate-100 sm:aspect-[3/1]"
           style={bannerStyle}
         >
           {isOwner ? (
@@ -344,8 +302,8 @@ export function FreelancerProfilePage() {
           ) : null}
         </div>
 
-        <div className="relative z-10 grid gap-8 px-6 pb-8 pt-4 lg:grid-cols-[1.3fr_0.7fr] lg:px-10">
-          <div className="-mt-10 space-y-6 sm:-mt-12">
+        <div className="relative z-10 grid gap-8 px-4 pb-8 pt-4 sm:px-6 lg:grid-cols-[1.3fr_0.7fr] lg:px-10">
+          <div className="mt-0 space-y-6 sm:-mt-12">
             <div className="relative z-20 rounded-[30px] border border-white/80 bg-white/96 p-4 shadow-[0_18px_46px_rgba(15,23,42,0.08)] sm:px-5 sm:py-4 xl:max-w-[860px]">
               <div className="grid gap-3 sm:grid-cols-[96px_minmax(0,1fr)] sm:items-start">
                 <div className="relative z-20 w-fit self-start rounded-[26px] bg-white p-1 shadow-[0_18px_50px_rgba(15,23,42,0.18)]">
@@ -366,7 +324,7 @@ export function FreelancerProfilePage() {
                 </div>
                 <div className="min-w-0 space-y-1 sm:pt-0.5">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                    <h1 className="text-4xl font-semibold leading-none tracking-[-0.05em] text-slate-950 sm:text-[4rem]">
+                    <h1 className="break-words text-[1.8rem] font-semibold leading-[1.02] tracking-[-0.05em] text-slate-950 sm:text-[3rem] xl:text-[4rem]">
                       {freelancer.name}
                     </h1>
                     {hasVerificationSeal ? <FreelancerVerifiedSeal /> : null}
@@ -397,7 +355,7 @@ export function FreelancerProfilePage() {
               </div>
             ) : null}
 
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {trustPoints.map((point) => (
                 <div
                   key={point.title}
@@ -486,132 +444,138 @@ export function FreelancerProfilePage() {
             </div>
           </div>
 
-          <aside className="-mt-10 self-start rounded-[32px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.97)_0%,rgba(246,249,255,0.96)_100%)] p-6 text-slate-950 shadow-[0_18px_48px_rgba(15,23,42,0.06)] lg:mt-8">
+          <aside className="self-start rounded-[32px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.97)_0%,rgba(246,249,255,0.96)_100%)] p-6 text-slate-950 shadow-[0_18px_48px_rgba(15,23,42,0.06)] lg:mt-8">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0071e3]">
-              Envie sua proposta
+              Contato externo
             </p>
             <h2 className="mt-4 text-2xl font-semibold tracking-[-0.03em]">
-              Fale com {firstName} com mais contexto
+              Fale com {firstName} do jeito mais direto
             </h2>
-              <p className="mt-3 text-sm leading-6 text-slate-300">
-              Descreva o projeto, o prazo e o objetivo. A comunicação oficial com este freelancer
-              acontece apenas no chat interno da plataforma.
-              </p>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Para aliviar a plataforma neste começo, o primeiro contato acontece fora do site. Use
+              os atalhos públicos deste perfil quando eles estiverem disponíveis.
+            </p>
 
             {isOwner ? (
               <div className="mt-6 space-y-4">
                 <div className="rounded-[28px] border border-slate-200 bg-white/80 p-5">
-                  <p className="text-sm font-semibold text-slate-950">Este ? o seu perfil p?blico</p>
+                  <p className="text-sm font-semibold text-slate-950">Este é o seu perfil público</p>
                   <p className="mt-3 text-sm leading-6 text-slate-600">
-                    Tudo o que os clientes enxergam fica aqui. Use esta pagina para revisar sua
-                    apresentacao e atualizar foto ou capa direto na imagem.
+                    Tudo o que os clientes enxergam fica aqui. Use esta página para revisar sua
+                    apresentação, revisar os canais externos e atualizar foto ou capa direto na
+                    imagem.
                   </p>
                 </div>
 
                 <div className="rounded-[28px] border border-slate-200 bg-white/80 p-5">
-                  <p className="text-sm font-semibold text-slate-950">Padrao de imagem</p>
+                  <p className="text-sm font-semibold text-slate-950">Padrão de imagem</p>
                   <div className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                    <p>Foto de perfil: ideal em 800 x 800 px e maximo de 5 MB.</p>
-                    <p>Banner do perfil: ideal em 1500 x 500 px e maximo de 8 MB.</p>
+                    <p>Foto de perfil: ideal em 800 x 800 px e máximo de 5 MB.</p>
+                    <p>Banner do perfil: ideal em 1500 x 500 px e máximo de 8 MB.</p>
                   </div>
                   <p className="mt-3 text-xs leading-5 text-slate-500">
-                    Use imagens nitidas e com boa luz. O banner funciona melhor no formato
+                    Use imagens nítidas e com boa luz. O banner funciona melhor no formato
                     horizontal.
                   </p>
                 </div>
 
+                <div className="rounded-[28px] border border-slate-200 bg-white/80 p-5">
+                  <p className="text-sm font-semibold text-slate-950">Canais visíveis no perfil</p>
+                  {externalChannels.length > 0 ? (
+                    <div className="mt-4 grid gap-3">
+                      {externalChannels.map((channel) => (
+                        <a
+                          key={channel.label}
+                          className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4 transition hover:border-[#0071e3]/25 hover:bg-white"
+                          href={channel.href}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <p className="text-sm font-semibold text-slate-950">{channel.label}</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-600">{channel.helper}</p>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm leading-6 text-slate-600">
+                      Seu perfil ainda não mostra WhatsApp, site ou LinkedIn. O WhatsApp costuma
+                      sair do celular cadastrado.
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid gap-3">
                   <Link
-                    className="rounded-full bg-[#0071e3] px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-[#0077ed]"
+                    className="inline-flex min-h-[44px] items-center justify-center rounded-full bg-[#0071e3] px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-[#0077ed]"
                     to="/dashboard/freelancer"
                   >
                     Abrir dashboard
                   </Link>
-                  <Link
-                    className="rounded-full border border-slate-200 bg-white px-5 py-3 text-center text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                    to="/mensagens"
-                  >
-                    Abrir mensagens
-                  </Link>
                 </div>
               </div>
-            ) : isClient ? (
-              <form className="mt-6 grid gap-4" onSubmit={handleContactSubmit}>
-                <FormField
-                  error={contactErrors.subject}
-                  label="Assunto"
-                  name="subject"
-                  onChange={handleContactChange}
-                  placeholder="Ex: orçamento para o serviço que preciso"
-                  value={contactForm.subject}
-                />
-                <FormField
-                  error={contactErrors.message}
-                  label="Mensagem"
-                  name="message"
-                  onChange={handleContactChange}
-                  onKeyDown={handleContactMessageKeyDown}
-                  placeholder="Explique o projeto, prazo e objetivo."
-                  textarea
-                  value={contactForm.message}
-                />
-
-                {contactStatus ? (
-                  <div
-                    className={`rounded-2xl px-4 py-3 text-sm ${
-                      contactStatus.tone === 'success'
-                        ? 'border border-emerald-200 bg-emerald-50 text-emerald-700'
-                        : 'border border-rose-200 bg-rose-50 text-rose-700'
-                    }`}
-                  >
-                    {contactStatus.text}
-                  </div>
-                ) : null}
-
-                <button
-                  className="rounded-full bg-[#0071e3] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0077ed] disabled:cursor-not-allowed disabled:bg-slate-300"
-                  disabled={submittingContact}
-                  type="submit"
-                >
-                  {submittingContact ? 'Enviando...' : 'Iniciar chat'}
-                </button>
-              </form>
             ) : (
               <div className="mt-6 space-y-4">
                 <div className="rounded-[28px] border border-slate-200 bg-white/80 p-5">
                   <p className="text-sm font-semibold text-slate-950">
-                    Libere esta etapa quando quiser avançar
+                    Escolha o melhor canal para avançar
                   </p>
                   <p className="mt-3 text-sm leading-6 text-slate-600">
-                    Entre como cliente para usar o chat interno e começar a conversa dentro da
-                    plataforma.
+                    O perfil já concentra as informações principais para você decidir se prefere
+                    chamar no WhatsApp, visitar o site ou validar a experiência no LinkedIn.
                   </p>
                 </div>
 
-                <div className="grid gap-3">
-                  <Link
-                    className="rounded-full bg-[#0071e3] px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-[#0077ed]"
-                    state={{ from: location }}
-                    to="/login"
-                  >
-                    Entrar para liberar contato
-                  </Link>
-                  <Link
-                    className="rounded-full border border-slate-200 bg-white px-5 py-3 text-center text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
-                    to="/cadastro/cliente"
-                  >
-                    Criar conta de cliente
-                  </Link>
-                </div>
+                {externalChannels.length > 0 ? (
+                  <div className="grid gap-3">
+                    {externalChannels.map((channel) => (
+                      <a
+                        key={channel.label}
+                        className={`rounded-[24px] border px-5 py-4 text-left transition ${
+                          channel.tone === 'primary'
+                            ? 'border-[#0071e3]/20 bg-[#0071e3]/6 hover:bg-[#0071e3]/10'
+                            : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                        href={channel.href}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        <p className="text-sm font-semibold text-slate-950">{channel.label}</p>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">{channel.helper}</p>
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-[28px] border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-900">
+                    Este profissional ainda não publicou um atalho externo de contato. Você pode
+                    avaliar o portfólio e voltar depois.
+                  </div>
+                )}
+
+                {session?.role !== 'client' ? (
+                  <div className="grid gap-3">
+                    <Link
+                      className="inline-flex min-h-[44px] items-center justify-center rounded-full bg-[#0071e3] px-5 py-3 text-center text-sm font-semibold text-white transition hover:bg-[#0077ed]"
+                      to="/cadastro/cliente"
+                    >
+                      Criar conta de cliente
+                    </Link>
+                    <Link
+                      className="inline-flex min-h-[44px] items-center justify-center rounded-full border border-slate-200 bg-white px-5 py-3 text-center text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      to="/login"
+                    >
+                      Entrar
+                    </Link>
+                  </div>
+                ) : null}
               </div>
             )}
 
             <div className="mt-6 rounded-[28px] border border-slate-200 bg-white/80 p-5">
               <p className="text-sm font-semibold text-slate-950">Por que esse fluxo ajuda</p>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                {isClient
-                  ? 'Sua mensagem chega com contexto do projeto e o histórico fica inteiro dentro da central de mensagens.'
-                  : 'Você conhece o profissional primeiro e só libera o contato quando decidir seguir, deixando a navegação mais leve.'}
+                {isOwner
+                  ? 'Seu perfil já apresenta o serviço e abre a porta para canais externos sem depender de uma central interna.'
+                  : 'Você conhece o profissional primeiro e escolhe o canal externo só quando decidir seguir, deixando a navegação mais leve.'}
               </p>
             </div>
 
@@ -623,8 +587,8 @@ export function FreelancerProfilePage() {
             <div className="mt-6 rounded-[28px] border border-slate-200 bg-white/80 p-5">
               <p className="text-sm font-semibold text-slate-950">Regra de comunicação</p>
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                Este perfil não entrega telefone, e-mail nem outro atalho de contato. O canal
-                oficial entre cliente e freelancer é o chat da plataforma.
+                Neste momento, o Faço Freela prioriza contato externo no primeiro passo para manter
+                a operação mais leve e o perfil mais objetivo.
               </p>
             </div>
           </aside>

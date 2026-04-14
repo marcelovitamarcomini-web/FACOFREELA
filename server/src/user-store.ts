@@ -4,9 +4,11 @@ import type {
   ConversationInbox,
   Freelancer,
   FreelancerDashboard,
+  FreelancerPlanTier,
   PortfolioItem,
   SessionUser,
   SubscriptionPlan,
+  SubscriptionStatus,
   UserRole,
 } from '../../shared/contracts.js';
 import {
@@ -14,12 +16,7 @@ import {
   freelancerPlanCatalog,
   getFreelancerPlanPrice,
 } from '../../shared/contracts.js';
-import type { StoredClient, StoredFreelancer } from './data.js';
 import {
-  findClientRecordByEmail as findLegacyClientRecordByEmail,
-  findClientRecordById as findLegacyClientRecordById,
-  findFreelancerRecordByEmail as findLegacyFreelancerRecordByEmail,
-  findFreelancerRecordById as findLegacyFreelancerRecordById,
   listContactsByClientIdentity,
   listContactsByFreelancerIdentity,
   recordFreelancerProfileViewByIdentity,
@@ -31,6 +28,7 @@ type SupabaseProfileRow = {
   full_name: string | null;
   email: string;
   phone: string | null;
+  phone_normalized?: string | null;
   user_type: UserRole | 'admin' | null;
   avatar_url: string | null;
   bio: string | null;
@@ -58,6 +56,9 @@ type DatabaseAvailabilityStatus = 'available' | 'busy' | 'unavailable';
 type SupabaseFreelancerProfileRow = {
   id: string;
   user_id: string;
+  cep: string | null;
+  city: string | null;
+  state: string | null;
   professional_title: string | null;
   skills: string[] | null;
   experience_level: DatabaseExperienceLevel | null;
@@ -69,6 +70,18 @@ type SupabaseFreelancerProfileRow = {
   total_reviews: number | null;
   created_at: string;
   updated_at: string;
+  category: string | null;
+  summary: string | null;
+  description: string | null;
+  years_experience: number | null;
+  linkedin_url: string | null;
+  website_url: string | null;
+  whatsapp: string | null;
+  subscription_tier: FreelancerPlanTier | null;
+  subscription_status: SubscriptionStatus | null;
+  subscription_started_at: string | null;
+  subscription_ends_at: string | null;
+  profile_views: number | null;
 };
 
 type UserLookup = {
@@ -76,6 +89,26 @@ type UserLookup = {
   email: string;
   source: 'supabase';
 };
+
+type ClientRecord = {
+  profile: ClientProfile;
+};
+
+type FreelancerRecord = {
+  email: string;
+  phone: string;
+  profile: Freelancer;
+  subscription: SubscriptionPlan;
+  metrics: FreelancerDashboard['metrics'];
+};
+
+export type ProfileWriteResult =
+  | { ok: true }
+  | {
+      ok: false;
+      message: string;
+      reason: 'duplicate_email' | 'duplicate_phone' | 'unknown';
+    };
 
 type SupabaseUserBundle =
   | {
@@ -102,38 +135,12 @@ function getSupabaseQueryClient(accessToken?: string) {
   return supabase;
 }
 
-// Block 1 canonical source of truth for user identity:
-// - public.profiles
-// - public.client_profiles
-// - public.freelancer_profiles
-//
-// Any local data touched below is residue only. It is never used for cadastro or autenticação.
-// It remains temporarily only for freelancer operational/showcase fields that do not belong
-// to the current Block 1 schema.
-
-type FreelancerOperationalResidue = Pick<
-  StoredFreelancer,
-  'email' | 'hasCnpj' | 'phone' | 'subscription' | 'metrics'
->;
-
-type FreelancerPresentationResidue = Pick<
-  Freelancer,
-  | 'slug'
-  | 'category'
-  | 'summary'
-  | 'description'
-  | 'yearsExperience'
-  | 'portfolio'
-  | 'linkedinUrl'
-  | 'websiteUrl'
-  | 'whatsapp'
-  | 'availability'
-  | 'memberSince'
-  | 'bannerUrl'
->;
-
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
+}
+
+function normalizePhoneDigits(phone: string): string {
+  return phone.replace(/\D/g, '');
 }
 
 function normalizeOptionalText(value?: string | null): string | undefined {
@@ -143,6 +150,58 @@ function normalizeOptionalText(value?: string | null): string | undefined {
 
   const normalized = value.trim();
   return normalized ? normalized : undefined;
+}
+
+function uniqueTextList(values: Array<string | undefined | null>) {
+  return [...new Set(values.map((value) => normalizeOptionalText(value)).filter(Boolean))] as string[];
+}
+
+function normalizeCategory(value?: string | null): Freelancer['category'] | undefined {
+  return categories.includes(value as Freelancer['category']) ? (value as Freelancer['category']) : undefined;
+}
+
+function normalizeSubscriptionTier(value?: string | null): FreelancerPlanTier {
+  return value === 'booster' ? 'booster' : 'normal';
+}
+
+function normalizeSubscriptionStatus(value?: string | null): SubscriptionStatus {
+  return value === 'pending' ||
+    value === 'past_due' ||
+    value === 'expired' ||
+    value === 'canceled' ||
+    value === 'active'
+    ? value
+    : 'active';
+}
+
+function mapProfileWriteError(
+  error: { code?: string | null; message?: string | null } | null | undefined,
+): ProfileWriteResult {
+  const message = error?.message ?? 'Nao foi possivel salvar os dados principais da conta.';
+  if (error?.code === '23505') {
+    const normalizedMessage = message.toLowerCase();
+    if (normalizedMessage.includes('profiles_email_key')) {
+      return {
+        ok: false,
+        message: 'Ja existe uma conta com este e-mail.',
+        reason: 'duplicate_email',
+      };
+    }
+
+    if (normalizedMessage.includes('profiles_phone_normalized_key')) {
+      return {
+        ok: false,
+        message: 'Ja existe uma conta com este telefone.',
+        reason: 'duplicate_phone',
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    message,
+    reason: 'unknown',
+  };
 }
 
 function normalizeFreelancerBannerUrl(value?: string | null): string | undefined {
@@ -158,23 +217,21 @@ function buildLocation(city?: string | null, state?: string | null): string {
   return [city?.trim(), state?.trim()].filter(Boolean).join(', ');
 }
 
-function fallbackName(profile: SupabaseProfileRow): string {
-  return profile.full_name?.trim() || profile.email;
+function buildDisplayName(profile?: SupabaseProfileRow | null): string {
+  return profile?.full_name?.trim() || profile?.email || 'Usuario';
 }
 
-function getExplicitUserRole(profile: SupabaseProfileRow): UserRole | undefined {
-  if (profile.user_type === 'client' || profile.user_type === 'freelancer') {
-    return profile.user_type;
-  }
-
-  return undefined;
+function normalizeUserRole(profile?: SupabaseProfileRow | null): UserRole | undefined {
+  return profile?.user_type === 'client' || profile?.user_type === 'freelancer'
+    ? profile.user_type
+    : undefined;
 }
 
 function inferUserRoleFromBundle(
   bundle: Exclude<SupabaseUserBundle, null>,
   fallbackRole?: UserRole,
 ): UserRole | undefined {
-  const explicitRole = getExplicitUserRole(bundle.profile);
+  const explicitRole = normalizeUserRole(bundle.profile);
   if (explicitRole) {
     return explicitRole;
   }
@@ -190,13 +247,10 @@ function inferUserRoleFromBundle(
   return fallbackRole;
 }
 
-function buildSessionUser(
-  profile: SupabaseProfileRow,
-  role: UserRole,
-): SessionUser {
+function buildSessionUser(profile: SupabaseProfileRow, role: UserRole): SessionUser {
   return {
     id: profile.id,
-    name: fallbackName(profile),
+    name: buildDisplayName(profile),
     role,
   };
 }
@@ -224,7 +278,7 @@ export function createPublicSlug(name: string, id: string): string {
   return `${base || 'freelancer'}-${id.slice(0, 8)}`;
 }
 
-function defaultPortfolio(url: string, title = 'Portfólio principal'): PortfolioItem[] {
+function defaultPortfolio(url: string, title = 'Portfolio principal'): PortfolioItem[] {
   return [
     {
       title,
@@ -238,89 +292,64 @@ function defaultYearsExperience(experienceLevel: Freelancer['experienceLevel']):
   switch (experienceLevel) {
     case 'Júnior':
       return 2;
-    case 'Pleno':
-      return 5;
     case 'Sênior':
       return 8;
+    case 'Pleno':
     default:
-      return 0;
+      return 5;
   }
+}
+
+function normalizeExperienceLabel(
+  value?: string | Freelancer['experienceLevel'] | null,
+): Freelancer['experienceLevel'] | undefined {
+  const normalized = value
+    ?.normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+  if (normalized === 'junior') return 'Júnior';
+  if (normalized === 'pleno') return 'Pleno';
+  if (normalized === 'senior' || normalized === 'especialista') return 'Sênior';
+  return undefined;
 }
 
 function fromDatabaseExperienceLevel(
   value: DatabaseExperienceLevel | null | undefined,
 ): Freelancer['experienceLevel'] {
-  switch (value) {
-    case 'junior':
-      return 'Júnior';
-    case 'senior':
-    case 'especialista':
-      return 'Sênior';
-    case 'pleno':
-    default:
-      return 'Pleno';
-  }
+  return value === 'junior' ? 'Júnior' : value === 'senior' || value === 'especialista' ? 'Sênior' : 'Pleno';
 }
 
 function toDatabaseExperienceLevel(
   value: Freelancer['experienceLevel'] | undefined,
 ): DatabaseExperienceLevel | null {
-  switch (value) {
-    case 'Júnior':
-      return 'junior';
-    case 'Sênior':
-      return 'senior';
-    case 'Pleno':
-      return 'pleno';
-    default:
-      return null;
-  }
+  const normalized = normalizeExperienceLabel(value);
+  if (normalized === 'Júnior') return 'junior';
+  if (normalized === 'Sênior') return 'senior';
+  if (normalized === 'Pleno') return 'pleno';
+  return null;
 }
 
-function availabilityTextFromStatus(
-  value: DatabaseAvailabilityStatus | null | undefined,
-): string {
-  switch (value) {
-    case 'available':
-      return 'Disponível para novos projetos.';
-    case 'busy':
-      return 'Agenda ocupada no momento.';
-    case 'unavailable':
-      return 'Indisponível para novos projetos.';
-    default:
-      return 'Perfil ativo na plataforma.';
-  }
+function availabilityTextFromStatus(value: DatabaseAvailabilityStatus | null | undefined): string {
+  if (value === 'available') return 'Disponivel para novos projetos.';
+  if (value === 'busy') return 'Agenda ocupada no momento.';
+  if (value === 'unavailable') return 'Indisponivel para novos projetos.';
+  return 'Perfil ativo na plataforma.';
 }
 
-function toDatabaseAvailabilityStatus(
-  value?: string,
-): DatabaseAvailabilityStatus | null {
+function toDatabaseAvailabilityStatus(value?: string): DatabaseAvailabilityStatus | null {
   if (!value) {
     return null;
   }
 
   const normalized = value.toLowerCase();
-  if (normalized.includes('indispon')) {
-    return 'unavailable';
-  }
-
-  if (normalized.includes('ocupad') || normalized.includes('agenda')) {
-    return 'busy';
-  }
-
+  if (normalized.includes('indispon')) return 'unavailable';
+  if (normalized.includes('ocupad') || normalized.includes('agenda')) return 'busy';
   return 'available';
 }
 
-function inferCategory(
-  profession: string,
-  skills: string[],
-  legacyCategory?: Freelancer['category'],
-): Freelancer['category'] {
-  const normalizedLegacyCategory = normalizeLegacyCategory(legacyCategory);
-  if (normalizedLegacyCategory) {
-    return normalizedLegacyCategory;
-  }
-
+function inferCategory(profession: string, skills: string[]): Freelancer['category'] {
   const haystack = `${profession} ${skills.join(' ')}`.toLowerCase();
 
   if (
@@ -362,12 +391,10 @@ function inferCategory(
   }
 
   if (
-    haystack.includes('técnic') ||
     haystack.includes('tecnic') ||
     haystack.includes('instala') ||
     haystack.includes('vistoria') ||
     haystack.includes('refrigera') ||
-    haystack.includes('ar-condicionado') ||
     haystack.includes('solda')
   ) {
     return 'Instalação e Manutenção';
@@ -377,7 +404,6 @@ function inferCategory(
     haystack.includes('design') ||
     haystack.includes('ux') ||
     haystack.includes('ui') ||
-    haystack.includes('vídeo') ||
     haystack.includes('video') ||
     haystack.includes('motion') ||
     haystack.includes('foto') ||
@@ -391,8 +417,8 @@ function inferCategory(
     haystack.includes('ads') ||
     haystack.includes('copy') ||
     haystack.includes('seo') ||
+    haystack.includes('conteudo') ||
     haystack.includes('reda') ||
-    haystack.includes('conteúdo') ||
     haystack.includes('trad') ||
     haystack.includes('vendas')
   ) {
@@ -413,80 +439,97 @@ function inferCategory(
     return 'Sites e Tecnologia';
   }
 
-  if (
-    haystack.includes('consult') ||
-    haystack.includes('mentoria') ||
-    haystack.includes('aula') ||
-    haystack.includes('planeja') ||
-    haystack.includes('financeir') ||
-    haystack.includes('contáb') ||
-    haystack.includes('contab') ||
-    haystack.includes('juríd') ||
-    haystack.includes('jurid')
-  ) {
-    return 'Projetos e Consultoria';
-  }
-
-  return categories[0];
+  return 'Projetos e Consultoria';
 }
 
-function normalizeLegacyCategory(
-  legacyCategory?: string,
-): Freelancer['category'] | undefined {
-  if (!legacyCategory) {
-    return undefined;
-  }
-
-  switch (legacyCategory) {
-    case 'Conserto em Casa':
-    case 'Obra e Reforma':
-    case 'Frete e Guincho':
-    case 'Instalação e Manutenção':
-    case 'Design e Vídeo':
-    case 'Marketing e Redes':
-    case 'Sites e Tecnologia':
-    case 'Projetos e Consultoria':
-      return legacyCategory;
-    case 'Casa e Reparos':
-      return 'Conserto em Casa';
-    case 'Obras e Reformas':
-      return 'Obra e Reforma';
-    case 'Transporte e Assistência':
-      return 'Frete e Guincho';
-    case 'Serviços Técnicos':
-      return 'Instalação e Manutenção';
-    case 'Design e Audiovisual':
-      return 'Design e Vídeo';
-    case 'Marketing e Conteúdo':
-      return 'Marketing e Redes';
-    case 'Tecnologia e Sites':
-      return 'Sites e Tecnologia';
-    case 'Consultoria e Projetos':
-      return 'Projetos e Consultoria';
-    case 'Design':
-    case 'Edição de Vídeo':
-      return 'Design e Vídeo';
-    case 'Programação':
-      return 'Sites e Tecnologia';
-    case 'Marketing Digital':
-    case 'Redação':
-    case 'Tradução':
-      return 'Marketing e Redes';
-    case 'Consultoria':
-      return 'Projetos e Consultoria';
-    default:
-      return undefined;
-  }
+function buildClientProfile(profile: SupabaseProfileRow): ClientProfile {
+  return {
+    id: profile.id,
+    name: buildDisplayName(profile),
+    email: profile.email,
+    phone: normalizeOptionalText(profile.phone) ?? '',
+    avatarUrl: normalizeOptionalText(profile.avatar_url),
+    location: buildLocation(profile.city, profile.state),
+    createdAt: profile.created_at,
+  };
 }
 
-function createDefaultSubscription(hasCnpj: boolean, tier: 'normal' | 'booster' = 'normal'): SubscriptionPlan {
+function buildFreelancerSubscription(
+  freelancerProfile?: SupabaseFreelancerProfileRow | null,
+): SubscriptionPlan {
+  const tier = normalizeSubscriptionTier(freelancerProfile?.subscription_tier);
+
   return {
     tier,
     name: freelancerPlanCatalog[tier].name,
-    priceMonthly: getFreelancerPlanPrice(tier, hasCnpj),
-    status: 'active',
-    startedAt: new Date().toISOString(),
-    endsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    priceMonthly: getFreelancerPlanPrice(tier),
+    status: normalizeSubscriptionStatus(freelancerProfile?.subscription_status),
+    startedAt: freelancerProfile?.subscription_started_at ?? new Date().toISOString(),
+    endsAt:
+      freelancerProfile?.subscription_ends_at ??
+      new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+}
+
+function buildFreelancer(
+  profile: SupabaseProfileRow,
+  freelancerProfile?: SupabaseFreelancerProfileRow | null,
+): Freelancer {
+  const profession = normalizeOptionalText(freelancerProfile?.professional_title) ?? 'Freelancer';
+  const storedCategory = normalizeCategory(freelancerProfile?.category);
+  const category = storedCategory ?? inferCategory(profession, freelancerProfile?.skills ?? []);
+  const experienceLevel = fromDatabaseExperienceLevel(freelancerProfile?.experience_level);
+  const portfolioUrl =
+    normalizeOptionalText(freelancerProfile?.portfolio_url) ??
+    normalizeOptionalText(freelancerProfile?.website_url) ??
+    'https://www.linkedin.com/';
+  const subscriptionTier = normalizeSubscriptionTier(freelancerProfile?.subscription_tier);
+
+  return {
+    id: profile.id,
+    slug: createPublicSlug(buildDisplayName(profile), profile.id),
+    name: buildDisplayName(profile),
+    profession,
+    subscriptionTier,
+    category,
+    summary:
+      normalizeOptionalText(freelancerProfile?.summary) ??
+      normalizeOptionalText(profile.bio) ??
+      'Perfil profissional em configuracao.',
+    description:
+      normalizeOptionalText(freelancerProfile?.description) ??
+      normalizeOptionalText(freelancerProfile?.summary) ??
+      normalizeOptionalText(profile.bio) ??
+      'O perfil ainda esta sendo completado com mais detalhes de atuacao.',
+    location: buildLocation(
+      freelancerProfile?.city ?? profile.city,
+      freelancerProfile?.state ?? profile.state,
+    ),
+    experienceLevel,
+    yearsExperience:
+      typeof freelancerProfile?.years_experience === 'number'
+        ? freelancerProfile.years_experience
+        : defaultYearsExperience(experienceLevel),
+    skills: uniqueTextList([
+      ...(freelancerProfile?.skills ?? []),
+      profession,
+      category,
+      'Atendimento direto',
+    ]),
+    portfolio: defaultPortfolio(portfolioUrl),
+    avatarUrl: normalizeOptionalText(profile.avatar_url) ?? defaultFreelancerAvatar,
+    linkedinUrl: normalizeOptionalText(freelancerProfile?.linkedin_url),
+    websiteUrl:
+      normalizeOptionalText(freelancerProfile?.website_url) ??
+      normalizeOptionalText(freelancerProfile?.portfolio_url),
+    whatsapp:
+      normalizeOptionalText(freelancerProfile?.whatsapp) ??
+      normalizePhoneDigits(profile.phone ?? '') ??
+      '',
+    verified: subscriptionTier === 'booster',
+    availability: availabilityTextFromStatus(freelancerProfile?.availability_status),
+    memberSince: profile.created_at,
+    bannerUrl: normalizeFreelancerBannerUrl(freelancerProfile?.banner_url) ?? defaultFreelancerBanner,
   };
 }
 
@@ -501,7 +544,7 @@ async function selectProfileByEmail(
 
   const { data, error } = await client
     .from('profiles')
-    .select('id,full_name,email,phone,user_type,avatar_url,bio,city,state,created_at,updated_at')
+    .select('id,full_name,email,phone,phone_normalized,user_type,avatar_url,bio,city,state,created_at,updated_at')
     .eq('email', normalizeEmail(email))
     .maybeSingle();
 
@@ -509,10 +552,49 @@ async function selectProfileByEmail(
     return null;
   }
 
-  return data;
+  return data as SupabaseProfileRow | null;
 }
 
-async function selectProfileById(id: string, accessToken?: string): Promise<SupabaseProfileRow | null> {
+async function selectProfileByPhone(
+  phone: string,
+  accessToken?: string,
+): Promise<SupabaseProfileRow | null> {
+  const client = getSupabaseQueryClient(accessToken);
+  const normalizedPhone = normalizePhoneDigits(phone);
+  if (!client || !normalizedPhone) {
+    return null;
+  }
+
+  const byNormalized = await client
+    .from('profiles')
+    .select('id,full_name,email,phone,phone_normalized,user_type,avatar_url,bio,city,state,created_at,updated_at')
+    .eq('phone_normalized', normalizedPhone)
+    .maybeSingle();
+
+  if (!byNormalized.error) {
+    return byNormalized.data as SupabaseProfileRow | null;
+  }
+
+  const fallback = await client
+    .from('profiles')
+    .select('id,full_name,email,phone,user_type,avatar_url,bio,city,state,created_at,updated_at')
+    .not('phone', 'is', null);
+
+  if (fallback.error || !fallback.data) {
+    return null;
+  }
+
+  const matched = (fallback.data as SupabaseProfileRow[]).find(
+    (profile) => normalizePhoneDigits(profile.phone ?? '') === normalizedPhone,
+  );
+
+  return matched ?? null;
+}
+
+async function selectProfileById(
+  id: string,
+  accessToken?: string,
+): Promise<SupabaseProfileRow | null> {
   const client = getSupabaseQueryClient(accessToken);
   if (!client) {
     return null;
@@ -520,7 +602,7 @@ async function selectProfileById(id: string, accessToken?: string): Promise<Supa
 
   const { data, error } = await client
     .from('profiles')
-    .select('id,full_name,email,phone,user_type,avatar_url,bio,city,state,created_at,updated_at')
+    .select('id,full_name,email,phone,phone_normalized,user_type,avatar_url,bio,city,state,created_at,updated_at')
     .eq('id', id)
     .maybeSingle();
 
@@ -528,7 +610,7 @@ async function selectProfileById(id: string, accessToken?: string): Promise<Supa
     return null;
   }
 
-  return data;
+  return data as SupabaseProfileRow | null;
 }
 
 async function selectClientProfileByUserId(
@@ -552,7 +634,7 @@ async function selectClientProfileByUserId(
     return null;
   }
 
-  return data;
+  return data as SupabaseClientProfileRow | null;
 }
 
 async function selectFreelancerProfileByUserId(
@@ -567,7 +649,7 @@ async function selectFreelancerProfileByUserId(
   const { data, error } = await client
     .from('freelancer_profiles')
     .select(
-      'id,user_id,professional_title,skills,experience_level,portfolio_url,banner_url,hourly_rate,availability_status,rating_average,total_reviews,created_at,updated_at',
+      'id,user_id,cep,city,state,professional_title,skills,experience_level,portfolio_url,banner_url,hourly_rate,availability_status,rating_average,total_reviews,created_at,updated_at,category,summary,description,years_experience,linkedin_url,website_url,whatsapp,subscription_tier,subscription_status,subscription_started_at,subscription_ends_at,profile_views',
     )
     .eq('user_id', userId)
     .maybeSingle();
@@ -576,7 +658,7 @@ async function selectFreelancerProfileByUserId(
     return null;
   }
 
-  return data;
+  return data as SupabaseFreelancerProfileRow | null;
 }
 
 async function selectProfilesByUserType(role: UserRole): Promise<SupabaseProfileRow[]> {
@@ -586,7 +668,7 @@ async function selectProfilesByUserType(role: UserRole): Promise<SupabaseProfile
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id,full_name,email,phone,user_type,avatar_url,bio,city,state,created_at,updated_at')
+    .select('id,full_name,email,phone,phone_normalized,user_type,avatar_url,bio,city,state,created_at,updated_at')
     .eq('user_type', role)
     .order('created_at', { ascending: true });
 
@@ -594,7 +676,7 @@ async function selectProfilesByUserType(role: UserRole): Promise<SupabaseProfile
     return [];
   }
 
-  return data;
+  return data as SupabaseProfileRow[];
 }
 
 async function selectFreelancerProfilesByUserIds(
@@ -607,7 +689,7 @@ async function selectFreelancerProfilesByUserIds(
   const { data, error } = await supabase
     .from('freelancer_profiles')
     .select(
-      'id,user_id,professional_title,skills,experience_level,portfolio_url,banner_url,hourly_rate,availability_status,rating_average,total_reviews,created_at,updated_at',
+      'id,user_id,cep,city,state,professional_title,skills,experience_level,portfolio_url,banner_url,hourly_rate,availability_status,rating_average,total_reviews,created_at,updated_at,category,summary,description,years_experience,linkedin_url,website_url,whatsapp,subscription_tier,subscription_status,subscription_started_at,subscription_ends_at,profile_views',
     )
     .in('user_id', userIds);
 
@@ -615,7 +697,7 @@ async function selectFreelancerProfilesByUserIds(
     return new Map();
   }
 
-  return new Map(data.map((item) => [item.user_id, item]));
+  return new Map((data as SupabaseFreelancerProfileRow[]).map((item) => [item.user_id, item]));
 }
 
 async function loadSupabaseUserBundle(id: string, accessToken?: string): Promise<SupabaseUserBundle> {
@@ -643,134 +725,41 @@ async function loadSupabaseUserBundleByEmail(
   return loadSupabaseUserBundle(profile.id, accessToken);
 }
 
-function findFreelancerLocalShadow(idOrEmail: string): StoredFreelancer | undefined {
-  return (
-    findLegacyFreelancerRecordById(idOrEmail) ??
-    findLegacyFreelancerRecordByEmail(idOrEmail)
-  );
+async function loadSupabaseUserBundleByPhone(
+  phone: string,
+  accessToken?: string,
+): Promise<SupabaseUserBundle> {
+  const profile = await selectProfileByPhone(phone, accessToken);
+  if (!profile) {
+    return null;
+  }
+
+  return loadSupabaseUserBundle(profile.id, accessToken);
 }
 
-function mergeClientFromSupabase(
+async function buildFreelancerRecord(
   bundle: Exclude<SupabaseUserBundle, null>,
-  legacy?: StoredClient,
-): StoredClient {
-  const location = buildLocation(bundle.profile.city, bundle.profile.state) || legacy?.profile.location || '';
+): Promise<FreelancerRecord> {
+  const contacts = await listContactsByFreelancerIdentity({
+    freelancerId: bundle.profile.id,
+  });
+  const subscription = buildFreelancerSubscription(bundle.freelancerProfile);
 
-  return {
-    profile: {
-      id: bundle.profile.id,
-      name: fallbackName(bundle.profile),
-      email: bundle.profile.email,
-      phone: bundle.profile.phone ?? legacy?.profile.phone ?? '',
-      avatarUrl: bundle.profile.avatar_url ?? undefined,
-      location,
-      createdAt:
-        bundle.clientProfile?.created_at ??
-        bundle.profile.created_at ??
-        legacy?.profile.createdAt ??
-        new Date().toISOString(),
-    },
-  };
-}
-
-function buildFreelancerPresentationResidue(
-  bundle: Exclude<SupabaseUserBundle, null>,
-  legacy?: StoredFreelancer,
-): FreelancerPresentationResidue {
-  const freelancerProfile = bundle.freelancerProfile;
-  const profession = freelancerProfile?.professional_title ?? legacy?.profile.profession ?? 'Freelancer';
-  const skills = freelancerProfile?.skills ?? legacy?.profile.skills ?? [];
-  const experienceLevel = fromDatabaseExperienceLevel(freelancerProfile?.experience_level);
-  const portfolioUrl =
-    freelancerProfile?.portfolio_url ??
-    legacy?.profile.portfolio[0]?.url ??
-    legacy?.profile.websiteUrl ??
-    'https://www.linkedin.com/';
-  const category = inferCategory(profession, skills, legacy?.profile.category);
-
-  return {
-    slug: legacy?.profile.slug ?? createPublicSlug(fallbackName(bundle.profile), bundle.profile.id),
-    category,
-    summary: bundle.profile.bio?.trim() || legacy?.profile.summary || 'Perfil profissional em configuração.',
-    description:
-      bundle.profile.bio?.trim() ||
-      legacy?.profile.description ||
-      'O perfil ainda está sendo completado com mais detalhes de atuação.',
-    yearsExperience: legacy?.profile.yearsExperience ?? defaultYearsExperience(experienceLevel),
-    portfolio:
-      legacy?.profile.portfolio && legacy.profile.portfolio.length > 0
-        ? legacy.profile.portfolio
-        : defaultPortfolio(portfolioUrl),
-    linkedinUrl: legacy?.profile.linkedinUrl,
-    websiteUrl: legacy?.profile.websiteUrl ?? freelancerProfile?.portfolio_url ?? undefined,
-    whatsapp: legacy?.profile.whatsapp ?? '',
-    availability:
-      legacy?.profile.availability ?? availabilityTextFromStatus(freelancerProfile?.availability_status),
-    memberSince: legacy?.profile.memberSince ?? bundle.profile.created_at,
-    bannerUrl:
-      normalizeFreelancerBannerUrl(freelancerProfile?.banner_url) ??
-      normalizeFreelancerBannerUrl(legacy?.profile.bannerUrl) ??
-      defaultFreelancerBanner,
-  };
-}
-
-function buildFreelancerOperationalResidue(
-  bundle: Exclude<SupabaseUserBundle, null>,
-  legacy?: StoredFreelancer,
-): FreelancerOperationalResidue {
   return {
     email: bundle.profile.email,
-    hasCnpj: legacy?.hasCnpj ?? false,
-    phone: bundle.profile.phone ?? legacy?.phone ?? '',
-    // Operational residue outside Block 1 schema.
-    // Subscription and metrics must move only in a later operational persistence block.
-    subscription: legacy?.subscription ?? createDefaultSubscription(legacy?.hasCnpj ?? false),
-    metrics: legacy?.metrics ?? {
-      profileViews: 0,
-      contactClicks: 0,
-      messagesReceived: 0,
+    phone: normalizeOptionalText(bundle.profile.phone) ?? '',
+    profile: buildFreelancer(bundle.profile, bundle.freelancerProfile),
+    subscription,
+    metrics: {
+      profileViews:
+        typeof bundle.freelancerProfile?.profile_views === 'number'
+          ? bundle.freelancerProfile.profile_views
+          : 0,
+      contactClicks: contacts.length,
+      messagesReceived: contacts.reduce((total, contact) => {
+        return total + contact.messages.filter((message) => message.senderRole === 'client').length;
+      }, 0),
     },
-  };
-}
-
-function mergeFreelancerFromSupabase(
-  bundle: Exclude<SupabaseUserBundle, null>,
-  legacy?: StoredFreelancer,
-): StoredFreelancer {
-  const freelancerProfile = bundle.freelancerProfile;
-  const profession = freelancerProfile?.professional_title ?? legacy?.profile.profession ?? 'Freelancer';
-  const skills = freelancerProfile?.skills ?? legacy?.profile.skills ?? [];
-  const experienceLevel = fromDatabaseExperienceLevel(freelancerProfile?.experience_level);
-  const location = buildLocation(bundle.profile.city, bundle.profile.state) || legacy?.profile.location || '';
-  const presentation = buildFreelancerPresentationResidue(bundle, legacy);
-  const operational = buildFreelancerOperationalResidue(bundle, legacy);
-  const profile: Freelancer = {
-    id: bundle.profile.id,
-    slug: presentation.slug,
-    name: fallbackName(bundle.profile),
-    profession,
-    subscriptionTier: operational.subscription.tier,
-    category: presentation.category,
-    summary: presentation.summary,
-    description: presentation.description,
-    location,
-    experienceLevel,
-    yearsExperience: presentation.yearsExperience,
-    skills,
-    portfolio: presentation.portfolio,
-    avatarUrl: bundle.profile.avatar_url ?? legacy?.profile.avatarUrl ?? defaultFreelancerAvatar,
-    linkedinUrl: presentation.linkedinUrl,
-    websiteUrl: presentation.websiteUrl,
-    whatsapp: presentation.whatsapp,
-    verified: operational.subscription.tier === 'booster',
-    availability: presentation.availability,
-    memberSince: presentation.memberSince,
-    bannerUrl: presentation.bannerUrl,
-  };
-
-  return {
-    ...operational,
-    profile,
   };
 }
 
@@ -786,6 +775,7 @@ export async function createSupabaseUserProfiles(input: {
   state?: string;
   bio?: string;
   freelancer?: {
+    cep?: string;
     professionalTitle?: string;
     experienceLevel?: Freelancer['experienceLevel'];
     skills?: string[];
@@ -794,6 +784,15 @@ export async function createSupabaseUserProfiles(input: {
     availabilityStatus?: string;
     ratingAverage?: number | null;
     totalReviews?: number | null;
+    category?: string;
+    summary?: string;
+    description?: string;
+    yearsExperience?: number;
+    linkedinUrl?: string;
+    websiteUrl?: string;
+    whatsapp?: string;
+    subscriptionTier?: FreelancerPlanTier;
+    subscriptionStatus?: SubscriptionStatus;
   };
   client?: {
     cep?: string;
@@ -802,10 +801,14 @@ export async function createSupabaseUserProfiles(input: {
     contactName?: string;
     companyDescription?: string;
   };
-}): Promise<boolean> {
+}): Promise<ProfileWriteResult> {
   const client = createSupabaseUserClient(input.accessToken);
   if (!client) {
-    return false;
+    return {
+      ok: false,
+      message: 'Contexto autenticado indisponivel para materializar o perfil.',
+      reason: 'unknown',
+    };
   }
 
   const profilePayload: Record<string, unknown> = {
@@ -816,125 +819,156 @@ export async function createSupabaseUserProfiles(input: {
   };
 
   const normalizedPhone = normalizeOptionalText(input.phone);
-  if (normalizedPhone) {
-    profilePayload.phone = normalizedPhone;
-  }
+  if (normalizedPhone) profilePayload.phone = normalizedPhone;
 
   const normalizedAvatarUrl = normalizeOptionalText(input.avatarUrl);
-  if (normalizedAvatarUrl) {
-    profilePayload.avatar_url = normalizedAvatarUrl;
-  }
+  if (normalizedAvatarUrl) profilePayload.avatar_url = normalizedAvatarUrl;
 
   const normalizedBio = normalizeOptionalText(input.bio);
-  if (normalizedBio) {
-    profilePayload.bio = normalizedBio;
-  }
+  if (normalizedBio) profilePayload.bio = normalizedBio;
 
   const normalizedCity = normalizeOptionalText(input.city);
-  if (normalizedCity) {
-    profilePayload.city = normalizedCity;
-  }
+  if (normalizedCity) profilePayload.city = normalizedCity;
 
   const normalizedState = normalizeOptionalText(input.state);
-  if (normalizedState) {
-    profilePayload.state = normalizedState;
-  }
+  if (normalizedState) profilePayload.state = normalizedState;
 
-  const profileResult = await client.from('profiles').upsert(
-    profilePayload,
-    { onConflict: 'id' },
-  );
-
+  const profileResult = await client.from('profiles').upsert(profilePayload, { onConflict: 'id' });
   if (profileResult.error) {
-    return false;
+    return mapProfileWriteError(profileResult.error);
   }
 
   if (input.role === 'client') {
     const clientPayload: Record<string, unknown> = {
       user_id: input.id,
+      contact_name: normalizeOptionalText(input.client?.contactName) ?? input.fullName,
     };
 
     const normalizedCep = normalizeOptionalText(input.client?.cep)?.replace(/\D/g, '');
-    if (normalizedCep) {
-      clientPayload.cep = normalizedCep;
-    }
+    if (normalizedCep) clientPayload.cep = normalizedCep;
 
     const normalizedCompanyName = normalizeOptionalText(input.client?.companyName);
-    if (normalizedCompanyName) {
-      clientPayload.company_name = normalizedCompanyName;
-    }
+    if (normalizedCompanyName) clientPayload.company_name = normalizedCompanyName;
 
     const normalizedDocumentNumber = normalizeOptionalText(input.client?.documentNumber);
-    if (normalizedDocumentNumber) {
-      clientPayload.document_number = normalizedDocumentNumber;
-    }
-
-    const normalizedContactName = normalizeOptionalText(input.client?.contactName);
-    if (normalizedContactName) {
-      clientPayload.contact_name = normalizedContactName;
-    } else {
-      clientPayload.contact_name = input.fullName;
-    }
+    if (normalizedDocumentNumber) clientPayload.document_number = normalizedDocumentNumber;
 
     const normalizedCompanyDescription = normalizeOptionalText(input.client?.companyDescription);
-    if (normalizedCompanyDescription) {
-      clientPayload.company_description = normalizedCompanyDescription;
+    if (normalizedCompanyDescription) clientPayload.company_description = normalizedCompanyDescription;
+
+    const clientResult = await client
+      .from('client_profiles')
+      .upsert(clientPayload, { onConflict: 'user_id' });
+
+    if (clientResult.error) {
+      return {
+        ok: false,
+        message: clientResult.error.message,
+        reason: 'unknown',
+      };
     }
 
-    const clientResult = await client.from('client_profiles').upsert(
-      clientPayload,
-      { onConflict: 'user_id' },
-    );
-
-    return !clientResult.error;
+    return { ok: true };
   }
 
+  const experienceLevel = input.freelancer?.experienceLevel ?? 'Pleno';
+  const profession = normalizeOptionalText(input.freelancer?.professionalTitle) ?? 'Freelancer';
+  const category =
+    normalizeCategory(input.freelancer?.category) ??
+    inferCategory(profession, input.freelancer?.skills ?? []);
+  const summary =
+    normalizeOptionalText(input.freelancer?.summary) ??
+    normalizedBio ??
+    'Perfil profissional em configuracao.';
+  const description = normalizeOptionalText(input.freelancer?.description) ?? summary;
+  const portfolioUrl =
+    normalizeOptionalText(input.freelancer?.portfolioUrl) ??
+    normalizeOptionalText(input.freelancer?.websiteUrl) ??
+    'https://www.linkedin.com/';
   const freelancerPayload: Record<string, unknown> = {
     user_id: input.id,
+    professional_title: profession,
+    skills:
+      Array.isArray(input.freelancer?.skills) && input.freelancer.skills.length > 0
+        ? input.freelancer.skills
+        : uniqueTextList([profession, category, 'Atendimento direto']),
+    experience_level: toDatabaseExperienceLevel(experienceLevel),
+    portfolio_url: portfolioUrl,
+    availability_status: toDatabaseAvailabilityStatus(input.freelancer?.availabilityStatus) ?? 'available',
+    rating_average: typeof input.freelancer?.ratingAverage === 'number' ? input.freelancer.ratingAverage : 0,
+    total_reviews: typeof input.freelancer?.totalReviews === 'number' ? input.freelancer.totalReviews : 0,
+    category,
+    summary,
+    description,
+    years_experience:
+      typeof input.freelancer?.yearsExperience === 'number'
+        ? input.freelancer.yearsExperience
+        : defaultYearsExperience(experienceLevel),
+    linkedin_url: normalizeOptionalText(input.freelancer?.linkedinUrl),
+    website_url: normalizeOptionalText(input.freelancer?.websiteUrl),
+    whatsapp: normalizeOptionalText(input.freelancer?.whatsapp) ?? normalizePhoneDigits(normalizedPhone ?? ''),
+    subscription_tier: input.freelancer?.subscriptionTier ?? 'normal',
+    subscription_status: input.freelancer?.subscriptionStatus ?? 'active',
   };
 
-  const normalizedProfessionalTitle = normalizeOptionalText(input.freelancer?.professionalTitle);
-  if (normalizedProfessionalTitle) {
-    freelancerPayload.professional_title = normalizedProfessionalTitle;
-  }
-
-  if (Array.isArray(input.freelancer?.skills)) {
-    freelancerPayload.skills = input.freelancer.skills;
-  }
-
-  if (input.freelancer?.experienceLevel) {
-    freelancerPayload.experience_level = toDatabaseExperienceLevel(input.freelancer.experienceLevel);
-  }
-
-  const normalizedPortfolioUrl = normalizeOptionalText(input.freelancer?.portfolioUrl);
-  if (normalizedPortfolioUrl) {
-    freelancerPayload.portfolio_url = normalizedPortfolioUrl;
-  }
+  const normalizedFreelancerCep = normalizeOptionalText(input.freelancer?.cep)?.replace(/\D/g, '');
+  if (normalizedFreelancerCep) freelancerPayload.cep = normalizedFreelancerCep;
+  if (normalizedCity) freelancerPayload.city = normalizedCity;
+  if (normalizedState) freelancerPayload.state = normalizedState;
 
   const normalizedBannerUrl = normalizeOptionalText(input.freelancer?.bannerUrl);
-  if (normalizedBannerUrl) {
-    freelancerPayload.banner_url = normalizedBannerUrl;
+  if (normalizedBannerUrl) freelancerPayload.banner_url = normalizedBannerUrl;
+
+  const freelancerResult = await client
+    .from('freelancer_profiles')
+    .upsert(freelancerPayload, { onConflict: 'user_id' });
+
+  if (freelancerResult.error) {
+    return {
+      ok: false,
+      message: freelancerResult.error.message,
+      reason: 'unknown',
+    };
   }
 
-  if (typeof input.freelancer?.availabilityStatus === 'string') {
-    freelancerPayload.availability_status = toDatabaseAvailabilityStatus(
-      input.freelancer.availabilityStatus,
-    );
+  return { ok: true };
+}
+
+export async function updateFreelancerSubscriptionState(input: {
+  endsAt?: string;
+  startedAt?: string;
+  status: SubscriptionStatus;
+  tier?: FreelancerPlanTier;
+  userId: string;
+}) {
+  const client = getSupabaseServerReadClient();
+  if (!client) {
+    return false;
   }
 
-  if (typeof input.freelancer?.ratingAverage === 'number') {
-    freelancerPayload.rating_average = input.freelancer.ratingAverage;
+  const patch: Record<string, unknown> = {
+    subscription_status: input.status,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.startedAt) {
+    patch.subscription_started_at = input.startedAt;
   }
 
-  if (typeof input.freelancer?.totalReviews === 'number') {
-    freelancerPayload.total_reviews = input.freelancer.totalReviews;
+  if (input.endsAt) {
+    patch.subscription_ends_at = input.endsAt;
   }
 
-  const freelancerResult = await client.from('freelancer_profiles').upsert(freelancerPayload, {
-    onConflict: 'user_id',
-  });
+  if (input.tier) {
+    patch.subscription_tier = input.tier;
+  }
 
-  return !freelancerResult.error;
+  const { error } = await client
+    .from('freelancer_profiles')
+    .update(patch)
+    .eq('user_id', input.userId);
+
+  return !error;
 }
 
 export async function updateSupabaseProfileAvatarUrl(input: {
@@ -997,7 +1031,7 @@ export async function ensureSupabaseUserSubtypeMaterialized(input: {
 
   const { data: profile, error: profileError } = await client
     .from('profiles')
-    .select('id,full_name,email,phone,user_type,avatar_url,bio,city,state,created_at,updated_at')
+    .select('id,full_name,email,phone,phone_normalized,user_type,avatar_url,bio,city,state,created_at,updated_at')
     .eq('id', input.userId)
     .maybeSingle<SupabaseProfileRow>();
 
@@ -1005,18 +1039,20 @@ export async function ensureSupabaseUserSubtypeMaterialized(input: {
     return input.fallbackRole;
   }
 
-  const resolvedRole = getExplicitUserRole(profile) ?? input.fallbackRole;
+  const resolvedRole = normalizeUserRole(profile) ?? input.fallbackRole;
   if (!resolvedRole) {
     return undefined;
   }
 
   const profilePatch: Record<string, unknown> = {};
-  if (!getExplicitUserRole(profile)) {
+  if (!normalizeUserRole(profile)) {
     profilePatch.user_type = resolvedRole;
   }
-
   if (!profile.full_name?.trim() && input.fallbackName) {
     profilePatch.full_name = input.fallbackName;
+  }
+  if (!profile.email?.trim() && input.fallbackEmail) {
+    profilePatch.email = normalizeEmail(input.fallbackEmail);
   }
 
   if (Object.keys(profilePatch).length > 0) {
@@ -1043,10 +1079,6 @@ export async function ensureSupabaseUserSubtypeMaterialized(input: {
     return resolvedRole;
   }
 
-  const legacyFreelancer =
-    findFreelancerLocalShadow(input.userId) ??
-    findFreelancerLocalShadow(profile.email) ??
-    (input.fallbackEmail ? findFreelancerLocalShadow(input.fallbackEmail) : undefined);
   const { data: freelancerProfile, error: freelancerProfileError } = await client
     .from('freelancer_profiles')
     .select('id')
@@ -1054,21 +1086,22 @@ export async function ensureSupabaseUserSubtypeMaterialized(input: {
     .maybeSingle<{ id: string }>();
 
   if (!freelancerProfileError && !freelancerProfile) {
-    // This runs after a real authenticated login and only fills the missing subtype row.
-    // It is safe to retry because the write is an upsert on user_id.
     await client.from('freelancer_profiles').upsert(
       {
         user_id: input.userId,
-        professional_title: legacyFreelancer?.profile.profession ?? null,
-        skills: legacyFreelancer?.profile.skills ?? [],
-        experience_level: toDatabaseExperienceLevel(legacyFreelancer?.profile.experienceLevel),
-        portfolio_url:
-          legacyFreelancer?.profile.portfolio[0]?.url ??
-          legacyFreelancer?.profile.websiteUrl ??
-          null,
-        availability_status: toDatabaseAvailabilityStatus(legacyFreelancer?.profile.availability),
+        professional_title: 'Freelancer',
+        skills: ['Atendimento direto'],
+        experience_level: 'pleno',
+        portfolio_url: 'https://www.linkedin.com/',
+        availability_status: 'available',
         rating_average: 0,
         total_reviews: 0,
+        category: 'Projetos e Consultoria',
+        summary: 'Perfil profissional em configuracao.',
+        description: 'Perfil profissional em configuracao.',
+        years_experience: 5,
+        subscription_tier: 'normal',
+        subscription_status: 'active',
       },
       { onConflict: 'user_id' },
     );
@@ -1083,15 +1116,32 @@ export async function findSessionUserByEmail(
 ): Promise<UserLookup | undefined> {
   const bundle = await loadSupabaseUserBundleByEmail(email, accessToken);
   const sessionUser = bundle ? buildSessionUserFromBundle(bundle) : undefined;
-  if (bundle && sessionUser) {
-    return {
-      user: sessionUser,
-      email: bundle.profile.email,
-      source: 'supabase',
-    };
+  if (!bundle || !sessionUser) {
+    return undefined;
   }
 
-  return undefined;
+  return {
+    user: sessionUser,
+    email: bundle.profile.email,
+    source: 'supabase',
+  };
+}
+
+export async function findSessionUserByPhone(
+  phone: string,
+  accessToken?: string,
+): Promise<UserLookup | undefined> {
+  const bundle = await loadSupabaseUserBundleByPhone(phone, accessToken);
+  const sessionUser = bundle ? buildSessionUserFromBundle(bundle) : undefined;
+  if (!bundle || !sessionUser) {
+    return undefined;
+  }
+
+  return {
+    user: sessionUser,
+    email: bundle.profile.email,
+    source: 'supabase',
+  };
 }
 
 export async function findSessionUserById(
@@ -1106,39 +1156,27 @@ export async function findSessionUserById(
 export async function findClientRecordById(
   id: string,
   accessToken?: string,
-): Promise<StoredClient | undefined> {
+): Promise<ClientRecord | undefined> {
   const bundle = await loadSupabaseUserBundle(id, accessToken);
-  if (!bundle) {
+  if (!bundle || inferUserRoleFromBundle(bundle, 'client') !== 'client') {
     return undefined;
   }
 
-  const legacy =
-    findLegacyClientRecordById(id) ??
-    findLegacyClientRecordByEmail(bundle.profile.email);
-  if (inferUserRoleFromBundle(bundle, 'client') === 'client') {
-    return mergeClientFromSupabase(bundle, legacy);
-  }
-
-  return undefined;
+  return {
+    profile: buildClientProfile(bundle.profile),
+  };
 }
 
 export async function findFreelancerRecordById(
   id: string,
   accessToken?: string,
-): Promise<StoredFreelancer | undefined> {
+): Promise<FreelancerRecord | undefined> {
   const bundle = await loadSupabaseUserBundle(id, accessToken);
-  if (!bundle) {
+  if (!bundle || inferUserRoleFromBundle(bundle, 'freelancer') !== 'freelancer') {
     return undefined;
   }
 
-  const legacy =
-    findFreelancerLocalShadow(id) ??
-    findFreelancerLocalShadow(bundle.profile.email);
-  if (inferUserRoleFromBundle(bundle, 'freelancer') === 'freelancer') {
-    return mergeFreelancerFromSupabase(bundle, legacy);
-  }
-
-  return undefined;
+  return buildFreelancerRecord(bundle);
 }
 
 export async function listPublicFreelancers(): Promise<Freelancer[]> {
@@ -1149,41 +1187,31 @@ export async function listPublicFreelancers(): Promise<Freelancer[]> {
 
   const subtypeMap = await selectFreelancerProfilesByUserIds(profiles.map((profile) => profile.id));
   return profiles
-    .map((profile) => {
-      const legacyShadow = findFreelancerLocalShadow(profile.id) ?? findFreelancerLocalShadow(profile.email);
-      const bundle: Exclude<SupabaseUserBundle, null> = {
-        profile,
-        clientProfile: null,
-        freelancerProfile: subtypeMap.get(profile.id) ?? null,
-      };
-
-      return mergeFreelancerFromSupabase(bundle, legacyShadow);
-    })
+    .map((profile) => buildFreelancer(profile, subtypeMap.get(profile.id) ?? null))
     .filter((freelancer) => {
-      return freelancer.subscription.status === 'active';
+      const row = subtypeMap.get(freelancer.id);
+      return normalizeSubscriptionStatus(row?.subscription_status) === 'active';
     })
     .sort((left, right) => {
-      const leftRank = left.profile.subscriptionTier === 'booster' ? 0 : 1;
-      const rightRank = right.profile.subscriptionTier === 'booster' ? 0 : 1;
+      const leftRank = left.subscriptionTier === 'booster' ? 0 : 1;
+      const rightRank = right.subscriptionTier === 'booster' ? 0 : 1;
 
       if (leftRank !== rightRank) {
         return leftRank - rightRank;
       }
 
-      return left.profile.name.localeCompare(right.profile.name, 'pt-BR');
-    })
-    .map((freelancer) => freelancer.profile);
+      return left.name.localeCompare(right.name, 'pt-BR');
+    });
 }
 
 export async function recordFreelancerProfileView(slug: string): Promise<Freelancer | undefined> {
   const freelancers = await listPublicFreelancers();
   const freelancer = freelancers.find((item) => item.slug === slug);
-
   if (!freelancer) {
     return undefined;
   }
 
-  recordFreelancerProfileViewByIdentity({
+  await recordFreelancerProfileViewByIdentity({
     freelancerId: freelancer.id,
     freelancerSlug: freelancer.slug,
   });
@@ -1195,9 +1223,6 @@ export async function getClientDashboard(
   id: string,
   accessToken?: string,
 ): Promise<ClientDashboard | undefined> {
-  // Dashboard assembly is intentionally split:
-  // - identity/profile comes from Supabase
-  // - contacts and UI conveniences remain local operational data for now
   const client = await findClientRecordById(id, accessToken);
   if (!client) {
     return undefined;
@@ -1206,15 +1231,11 @@ export async function getClientDashboard(
   return {
     profile: client.profile,
     favorites: (await listPublicFreelancers()).slice(0, 3),
-    recentContacts: listContactsByClientIdentity({
-      clientId: client.profile.id,
-      clientEmail: client.profile.email,
-      clientName: client.profile.name,
-    }).slice(0, 5),
+    recentContacts: [],
     notifications: [
-      'Sua conversa foi registrada no chat interno da plataforma.',
-      'Novas respostas aparecem direto na central de mensagens.',
-      'Toda a comunicação oficial entre cliente e freelancer fica dentro do site.',
+      'O perfil agora e o ponto principal para avaliar o profissional antes do contato.',
+      'O primeiro contato pode seguir por WhatsApp, site ou LinkedIn conforme o perfil.',
+      'Sua conta continua util para organizar busca, favoritos e proximos passos.',
     ],
   };
 }
@@ -1223,27 +1244,29 @@ export async function getFreelancerDashboard(
   id: string,
   accessToken?: string,
 ): Promise<FreelancerDashboard | undefined> {
-  // Dashboard assembly is intentionally split:
-  // - identity/profile comes from Supabase
-  // - subscription/metrics/recent contacts remain local operational residue for now
   const freelancer = await findFreelancerRecordById(id, accessToken);
   if (!freelancer) {
     return undefined;
   }
 
+  const recentContacts = (await listContactsByFreelancerIdentity({
+    freelancerId: freelancer.profile.id,
+    freelancerEmail: freelancer.email,
+    freelancerName: freelancer.profile.name,
+  })).slice(0, 5);
+
   return {
     profile: freelancer.profile,
     subscription: freelancer.subscription,
-    metrics: freelancer.metrics,
-    recentContacts: listContactsByFreelancerIdentity({
-      freelancerId: freelancer.profile.id,
-      freelancerEmail: freelancer.email,
-      freelancerName: freelancer.profile.name,
-    }).slice(0, 5),
+    metrics: {
+      profileViews: freelancer.metrics.profileViews,
+      contactClicks: freelancer.metrics.contactClicks,
+      messagesReceived: freelancer.metrics.messagesReceived,
+    },
+    recentContacts,
     account: {
       email: freelancer.email,
       phone: freelancer.phone,
-      hasCnpj: freelancer.hasCnpj,
     },
   };
 }
@@ -1251,33 +1274,35 @@ export async function getFreelancerDashboard(
 export async function getConversationInbox(
   id: string,
   role: UserRole,
-  accessToken?: string,
+  _accessToken?: string,
 ): Promise<ConversationInbox | undefined> {
   if (role === 'client') {
-    const client = await findClientRecordById(id, accessToken);
+    const client = await findClientRecordById(id);
     if (!client) {
       return undefined;
     }
 
     return {
-      contacts: listContactsByClientIdentity({
+      contacts: await listContactsByClientIdentity({
         clientId: client.profile.id,
         clientEmail: client.profile.email,
         clientName: client.profile.name,
       }),
+      seenMessageIds: {},
     };
   }
 
-  const freelancer = await findFreelancerRecordById(id, accessToken);
+  const freelancer = await findFreelancerRecordById(id);
   if (!freelancer) {
     return undefined;
   }
 
   return {
-    contacts: listContactsByFreelancerIdentity({
+    contacts: await listContactsByFreelancerIdentity({
       freelancerId: freelancer.profile.id,
       freelancerEmail: freelancer.email,
       freelancerName: freelancer.profile.name,
     }),
+    seenMessageIds: {},
   };
 }

@@ -75,20 +75,20 @@ export function LoginPage() {
   }
 
   return (
-    <div className="container grid gap-10 py-16 lg:grid-cols-[0.92fr_1.08fr]">
+    <div className="container grid gap-8 py-10 sm:gap-10 sm:py-12 xl:grid-cols-[0.92fr_1.08fr] xl:items-start xl:py-16">
       <section className="space-y-6">
         <span className="inline-flex rounded-full border border-slate-200 bg-white/88 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
           Acesso
         </span>
-        <h1 className="text-4xl font-semibold tracking-[-0.05em] text-slate-950 sm:text-5xl">
-          Entre na sua conta para acompanhar pedidos, conversas e serviços com facilidade.
+        <h1 className="text-[2.35rem] font-semibold leading-[1.02] tracking-[-0.05em] text-slate-950 sm:text-[3rem] xl:text-[3.4rem]">
+          Entre na sua conta para acompanhar pedidos, perfis e serviços com facilidade.
         </h1>
         <p className="max-w-xl text-[1.02rem] leading-7 text-slate-500">
-          Aqui você encontra tudo em um lugar só: conversa, interesse recebido, pedidos em
-          andamento e acesso ao que foi liberado para a sua conta.
+          Aqui você encontra tudo em um lugar só: perfis salvos, pedidos em andamento e acesso ao
+          que foi liberado para a sua conta.
         </p>
 
-        <div className="rounded-[34px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(246,249,255,0.96)_100%)] p-7 shadow-[0_20px_55px_rgba(15,23,42,0.05)]">
+        <div className="rounded-[34px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.96)_0%,rgba(246,249,255,0.96)_100%)] p-5 shadow-[0_20px_55px_rgba(15,23,42,0.05)] sm:p-7">
           <div className="flex items-center justify-between gap-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#0071e3]">
               Jump freelancer
@@ -108,13 +108,13 @@ export function LoginPage() {
 
           <div className="mt-5 flex flex-wrap gap-3">
             <Link
-              className="rounded-full bg-[#0071e3] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0077ed]"
+              className="inline-flex min-h-[44px] items-center rounded-full bg-[#0071e3] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#0077ed]"
               to="/cadastro/freelancer"
             >
               Ir para cadastro freelancer
             </Link>
             <Link
-              className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              className="inline-flex min-h-[44px] items-center rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
               to="/cadastro/cliente"
             >
               Criar conta de cliente
@@ -127,13 +127,13 @@ export function LoginPage() {
             Estado de sessão
           </p>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            O acesso usa a autenticação da plataforma para liberar dashboards, conversa e
-            permissões conforme o tipo correto de usuário.
+            O acesso usa a autenticação da plataforma para liberar dashboards, perfis e permissões
+            conforme o tipo correto de usuário.
           </p>
         </div>
       </section>
 
-      <section className="glass-panel tech-panel rounded-[34px] p-6 lg:p-8">
+      <section className="glass-panel tech-panel rounded-[34px] p-5 sm:p-6 lg:p-8">
         <form className="grid gap-5" onSubmit={handleSubmit}>
           <FormField
             error={errors.email}
@@ -173,20 +173,20 @@ export function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3 text-sm">
+        <div className="mt-6 flex flex-col gap-3 text-sm sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <a
-            className="font-semibold text-[#0071e3] transition hover:text-[#0077ed]"
+            className="inline-flex min-h-[44px] items-center rounded-full px-3 font-semibold text-[#0071e3] transition hover:bg-[#0071e3]/6 hover:text-[#0077ed]"
             href={passwordSupportMailto}
           >
             Esqueci minha senha
           </a>
-          <div className="flex flex-wrap items-center gap-3 text-slate-500">
+          <div className="flex flex-col gap-2 text-slate-500 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
             <span>Não tem conta?</span>
-            <Link className="font-semibold text-[#0071e3]" to="/cadastro/cliente">
+            <Link className="inline-flex min-h-[44px] items-center rounded-full px-3 font-semibold text-[#0071e3] transition hover:bg-[#0071e3]/6" to="/cadastro/cliente">
               Criar conta
             </Link>
             <Link
-              className="rounded-full bg-[#0071e3]/8 px-3 py-1.5 font-semibold text-[#0071e3] transition hover:bg-[#0071e3]/12"
+              className="inline-flex min-h-[44px] items-center rounded-full bg-[#0071e3]/8 px-4 py-2 font-semibold text-[#0071e3] transition hover:bg-[#0071e3]/12"
               to="/cadastro/freelancer"
             >
               Virar freelancer

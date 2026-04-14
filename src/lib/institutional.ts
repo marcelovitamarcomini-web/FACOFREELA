@@ -25,7 +25,7 @@ export const institutionalChannels: InstitutionalChannel[] = [
     title: 'E-mail institucional',
     value: institutionalEmail,
     href: institutionalSupportMailto,
-    description: 'Canal oficial para suporte, d?vidas operacionais e contato institucional.',
+    description: 'Canal oficial para suporte, dúvidas operacionais e contato institucional.',
     actionLabel: 'Enviar e-mail',
   },
   {
@@ -33,7 +33,7 @@ export const institutionalChannels: InstitutionalChannel[] = [
     title: 'Instagram oficial',
     value: institutionalInstagramHandle,
     href: institutionalInstagramUrl,
-    description: 'Presen?a oficial da marca para atualiza??es, visibilidade e comunica??o p?blica.',
+    description: 'Presença oficial da marca para atualizações, visibilidade e comunicação pública.',
     actionLabel: 'Abrir Instagram',
   },
   {
@@ -41,7 +41,7 @@ export const institutionalChannels: InstitutionalChannel[] = [
     title: 'LinkedIn da empresa',
     value: institutionalLinkedinLabel,
     href: institutionalLinkedinUrl,
-    description: 'Canal institucional para marca, reputa??o e relacionamento profissional.',
+    description: 'Canal institucional para marca, reputação e relacionamento profissional.',
     actionLabel: 'Abrir LinkedIn',
   },
 ];

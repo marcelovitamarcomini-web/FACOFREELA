@@ -843,6 +843,45 @@ const content: Record<string, InfoPageContent> = {
   },
 };
 
+function InstitutionalShortcut({
+  href,
+  title,
+  value,
+  external = false,
+  accent = 'neutral',
+}: {
+  href: string;
+  title: string;
+  value: string;
+  external?: boolean;
+  accent?: 'brand' | 'neutral';
+}) {
+  const externalProps = external ? { rel: 'noreferrer', target: '_blank' as const } : {};
+
+  return (
+    <a
+      className={`group rounded-[22px] border p-4 transition ${
+        accent === 'brand'
+          ? 'border-[#0071e3]/14 bg-[#0071e3]/[0.05] hover:border-[#0071e3]/24 hover:bg-[#0071e3]/[0.08]'
+          : 'border-slate-200/80 bg-slate-50/90 hover:border-slate-300 hover:bg-white'
+      }`}
+      href={href}
+      {...externalProps}
+    >
+      <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+        {title}
+      </span>
+      <span
+        className={`mt-2 block break-all text-sm font-semibold leading-6 ${
+          accent === 'brand' ? 'text-[#0071e3]' : 'text-slate-900'
+        }`}
+      >
+        {value}
+      </span>
+    </a>
+  );
+}
+
 function OfficialReferencesBlock() {
   return (
     <section className="rounded-[30px] border border-slate-200/80 bg-white/92 p-6 shadow-[0_16px_40px_rgba(15,23,42,0.05)]">
@@ -850,33 +889,29 @@ function OfficialReferencesBlock() {
         Canais oficiais da marca
       </p>
       <p className="mt-3 text-sm leading-7 text-slate-600">
-        Para suporte institucional, escreva para{' '}
-        <a
-          className="font-semibold text-[#0071e3] transition hover:text-[#0077ed]"
-          href={institutionalSupportMailto}
-        >
-          {institutionalEmail}
-        </a>
-        . A marca também mantém presença oficial no{' '}
-        <a
-          className="font-semibold text-slate-700 transition hover:text-slate-950"
-          href={institutionalInstagramUrl}
-          rel="noreferrer"
-          target="_blank"
-        >
-          Instagram {institutionalInstagramHandle}
-        </a>{' '}
-        e no{' '}
-        <a
-          className="font-semibold text-slate-700 transition hover:text-slate-950"
-          href={institutionalLinkedinUrl}
-          rel="noreferrer"
-          target="_blank"
-        >
-          LinkedIn {institutionalLinkedinLabel}
-        </a>
-        .
+        Para suporte institucional, contato oficial da marca ou validação dos canais públicos,
+        use os atalhos abaixo.
       </p>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <InstitutionalShortcut
+          accent="brand"
+          href={institutionalSupportMailto}
+          title="E-mail oficial"
+          value={institutionalEmail}
+        />
+        <InstitutionalShortcut
+          external
+          href={institutionalInstagramUrl}
+          title="Instagram oficial"
+          value={`Instagram ${institutionalInstagramHandle}`}
+        />
+        <InstitutionalShortcut
+          external
+          href={institutionalLinkedinUrl}
+          title="LinkedIn oficial"
+          value={`LinkedIn ${institutionalLinkedinLabel}`}
+        />
+      </div>
     </section>
   );
 }
@@ -915,35 +950,25 @@ function ContactCards() {
 function ContactInstitutionalList() {
   return (
     <div className="rounded-[26px] border border-slate-200/80 bg-slate-50/90 p-5">
-      <div className="space-y-3 text-sm leading-7 text-slate-700">
-        <p>
-          E-mail institucional:{' '}
-          <a className="font-semibold text-[#0071e3] transition hover:text-[#0077ed]" href={institutionalSupportMailto}>
-            {institutionalEmail}
-          </a>
-        </p>
-        <p>
-          Instagram oficial:{' '}
-          <a
-            className="font-semibold text-[#0071e3] transition hover:text-[#0077ed]"
-            href={institutionalInstagramUrl}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {institutionalInstagramHandle}
-          </a>
-        </p>
-        <p>
-          LinkedIn oficial:{' '}
-          <a
-            className="font-semibold text-[#0071e3] transition hover:text-[#0077ed]"
-            href={institutionalLinkedinUrl}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {institutionalLinkedinUrl}
-          </a>
-        </p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <InstitutionalShortcut
+          accent="brand"
+          href={institutionalSupportMailto}
+          title="E-mail institucional"
+          value={institutionalEmail}
+        />
+        <InstitutionalShortcut
+          external
+          href={institutionalInstagramUrl}
+          title="Instagram oficial"
+          value={institutionalInstagramHandle}
+        />
+        <InstitutionalShortcut
+          external
+          href={institutionalLinkedinUrl}
+          title="LinkedIn oficial"
+          value={institutionalLinkedinLabel}
+        />
       </div>
     </div>
   );
@@ -988,15 +1013,18 @@ export function InfoPage() {
 
   if (!page) {
     return (
-      <div className="container py-14">
-        <div className="glass-panel rounded-[32px] p-8 shadow-soft">
-          <h1 className="text-3xl font-extrabold tracking-tight text-slate-950">
+      <div className="container py-10 sm:py-12 lg:py-14">
+        <div className="glass-panel rounded-[32px] p-5 shadow-soft sm:p-8">
+          <h1 className="text-[2.2rem] font-extrabold tracking-tight text-slate-950 sm:text-4xl">
             Página não encontrada
           </h1>
           <p className="mt-4 text-sm leading-6 text-slate-600">
             O conteúdo institucional solicitado não existe nesta versão.
           </p>
-          <Link className="mt-6 inline-flex text-sm font-semibold text-brand-600" to="/">
+          <Link
+            className="mt-6 inline-flex min-h-[44px] items-center rounded-full border border-brand-100 bg-brand-50 px-4 text-sm font-semibold text-brand-600 transition hover:bg-brand-100"
+            to="/"
+          >
             Voltar para a página inicial
           </Link>
         </div>
@@ -1005,14 +1033,14 @@ export function InfoPage() {
   }
 
   return (
-    <div className="container py-14">
+    <div className="container py-10 sm:py-12 lg:py-14">
       <article className="glass-panel mx-auto max-w-[78rem] overflow-hidden rounded-[36px] shadow-soft">
-        <div className="border-b border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(246,249,255,0.96)_100%)] p-8 lg:p-10">
+        <div className="border-b border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(246,249,255,0.96)_100%)] p-5 sm:p-8 lg:p-10">
           <div className="mx-auto max-w-4xl">
             <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-600">
               Institucional
             </p>
-            <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-slate-950">
+            <h1 className="mt-4 text-[2.25rem] font-extrabold leading-[1.03] tracking-tight text-slate-950 sm:text-[3rem]">
               {page.title}
             </h1>
             <p className="mt-5 text-base leading-8 text-slate-600">{page.intro}</p>
@@ -1025,7 +1053,7 @@ export function InfoPage() {
           </div>
         </div>
 
-        <div className="p-8 lg:p-10">
+        <div className="p-5 sm:p-8 lg:p-10">
           <div className="mx-auto max-w-4xl space-y-8">
             {page.blocks?.length ? (
               <div className="space-y-5">
@@ -1040,7 +1068,7 @@ export function InfoPage() {
                     key={section.title}
                     className={index === 0 ? 'space-y-4' : 'space-y-4 border-t border-slate-200/80 pt-8'}
                   >
-                    <h2 className="text-2xl font-semibold tracking-[-0.03em] text-slate-950">
+                    <h2 className="text-[1.5rem] font-semibold tracking-[-0.03em] text-slate-950 sm:text-2xl">
                       {section.title}
                     </h2>
                     <div className="space-y-4">
@@ -1058,16 +1086,13 @@ export function InfoPage() {
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#0071e3]">
                   Suporte oficial
                 </p>
-                <p className="mt-3 text-sm leading-7 text-slate-700">
-                  {page.supportCopy}{' '}
-                  <a
-                    className="font-semibold text-[#0071e3] transition hover:text-[#0077ed]"
-                    href={institutionalSupportMailto}
-                  >
-                    {institutionalEmail}
-                  </a>
-                  .
-                </p>
+                <p className="mt-3 text-sm leading-7 text-slate-700">{page.supportCopy}</p>
+                <a
+                  className="mt-4 inline-flex min-h-[44px] items-center break-all rounded-full border border-[#0071e3]/16 bg-white/90 px-4 text-sm font-semibold text-[#0071e3] transition hover:border-[#0071e3]/24 hover:bg-white"
+                  href={institutionalSupportMailto}
+                >
+                  {institutionalEmail}
+                </a>
               </section>
             ) : null}
 

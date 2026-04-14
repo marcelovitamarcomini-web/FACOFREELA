@@ -1,16 +1,11 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
 import type { Freelancer } from '../../shared/contracts';
-import { useAppSession } from '../context/AppSessionContext';
 import { FreelancerVerifiedSeal } from './FreelancerVerifiedSeal';
 
 export function FreelancerCard({ freelancer }: { freelancer: Freelancer }) {
-  const location = useLocation();
-  const { session } = useAppSession();
   const isBooster = freelancer.subscriptionTier === 'booster';
   const hasVerificationSeal = isBooster;
-  const canContact = session?.role === 'client';
-  const contactLabel = canContact ? 'Iniciar chat' : 'Entrar para conversar';
 
   return (
     <article
@@ -20,18 +15,18 @@ export function FreelancerCard({ freelancer }: { freelancer: Freelancer }) {
           : ''
       }`}
     >
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <div className="flex items-center gap-4">
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-4">
           <img
             alt={freelancer.name}
-            className={`h-16 w-16 rounded-[20px] object-cover ring-4 ${
+            className={`h-14 w-14 rounded-[18px] object-cover ring-4 sm:h-16 sm:w-16 sm:rounded-[20px] ${
               isBooster ? 'ring-[#0071e3]/16' : 'ring-slate-200'
             }`}
             src={freelancer.avatarUrl}
           />
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-bold text-slate-950">{freelancer.name}</h3>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="break-words text-base font-bold text-slate-950 sm:text-lg">{freelancer.name}</h3>
               {hasVerificationSeal ? <FreelancerVerifiedSeal variant="search" /> : null}
             </div>
             <p className="text-sm font-medium text-slate-600">{freelancer.profession}</p>
@@ -39,7 +34,7 @@ export function FreelancerCard({ freelancer }: { freelancer: Freelancer }) {
         </div>
 
         <span
-          className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+          className={`self-start rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
             isBooster
               ? 'border border-[#0071e3]/18 bg-[#0071e3]/6 text-[#0071e3]'
               : 'border border-slate-200 bg-white text-slate-600'
@@ -74,7 +69,7 @@ export function FreelancerCard({ freelancer }: { freelancer: Freelancer }) {
               : 'border border-slate-200/80 bg-white/80'
           }`}
         >
-          <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Localiza??o</p>
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Localização</p>
           <p className="mt-1 text-sm font-semibold text-slate-700">{freelancer.location}</p>
         </div>
         <div
@@ -91,17 +86,16 @@ export function FreelancerCard({ freelancer }: { freelancer: Freelancer }) {
 
       <div className="mt-auto flex flex-wrap gap-3">
         <Link
-          className="w-full rounded-full bg-[#0071e3] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-[#0077ed] sm:w-auto"
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-full bg-[#0071e3] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-[#0077ed] sm:w-auto"
           to={`/freelancers/${freelancer.slug}`}
         >
           Ver perfil completo
         </Link>
         <Link
-          className="w-full rounded-full border border-slate-200 px-4 py-2 text-center text-sm font-semibold text-slate-700 transition hover:border-[#0071e3]/30 hover:text-[#0071e3] sm:w-auto"
-          state={canContact ? undefined : { from: location }}
-          to={canContact ? `/freelancers/${freelancer.slug}` : '/login'}
+          className="inline-flex min-h-[44px] w-full items-center justify-center rounded-full border border-slate-200 px-4 py-2 text-center text-sm font-semibold text-slate-700 transition hover:border-[#0071e3]/30 hover:text-[#0071e3] sm:w-auto"
+          to={`/freelancers/${freelancer.slug}`}
         >
-          {contactLabel}
+          Ver contato externo
         </Link>
       </div>
     </article>
